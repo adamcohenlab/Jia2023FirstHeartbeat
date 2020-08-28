@@ -1,0 +1,26 @@
+axes.titlesize : 28
+axes.labelsize : 26
+axes.linewidth : 1.5
+
+lines.linewidth : 3
+lines.markersize : 8
+lines.markeredgewidth: 1
+
+xtick.labelsize : 23
+xtick.major.width : 1.5
+xtick.minor.width : 0.8
+xtick.major.size : 7
+xtick.minor.size : 4
+
+ytick.labelsize : 23
+ytick.major.width: 1.5
+ytick.minor.width: 0.8
+ytick.major.size : 7
+ytick.minor.size : 4
+
+legend.framealpha: 0.8
+legend.fontsize: 16
+legend.borderpad: 0.4
+legend.borderaxespad: 0.6
+
+image.cmap: Spectral
