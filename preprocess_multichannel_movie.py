@@ -5,42 +5,29 @@ import skimage.io as skio
 import numpy as np
 import json
 import gc
+import utils
 import skimage.morphology as morph
 import skimage.filters as filters
 # axes are T, (Z), (C), (Y), (X) 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("input", help="Input file or folder")
+parser.add_argument("input", help="Input file")
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
 
 args = parser.parse_args()
-# Locate the XML file
 input_path = args.input
 
-folder_names = input_path.split("/")
-if folder_names[-1] == "":
-    expt_name = folder_names[-2]
-else:
-    expt_name = folder_names[-1]
-expt_name = expt_name.split(".tif")[0]
-print(expt_name)
+expt_name = utils.extract_experiment_name(input_path)
 
 if args.output_folder is None:
-    output_folder = os.path.dirname(input_path)
+    output_folder = os.path.join(os.path.dirname(input_path), expt_name)
 else:
     output_folder = args.output_folder
 if not os.path.exists(output_folder):
     os.mkdir(output_folder)
-try:
-    os.mkdir(os.path.join(output_folder, "raw_ratios_medfiltered"))
-    os.mkdir(os.path.join(output_folder, "C1_medfiltered"))
-    os.mkdir(os.path.join(output_folder, "C2_medfiltered"))
-    os.mkdir(os.path.join(output_folder, "C1"))
-    os.mkdir(os.path.join(output_folder, "C2"))
 
-except Exception:
-    pass
-stack = skio.imread(input_path)
+utils.write_subfolders(output_folder, ["raw_ratios_medfiltered", "C1_medfiltered", "C2_medfiltered", "C1", "C2"])
+stack = utils.standardize_n_dims(skio.imread(input_path))
 timepoints = stack.shape[0]
 
 

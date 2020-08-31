@@ -15,6 +15,7 @@ def raw_membrane_to_mask(stack, erode=True):
     return mask
 
 def slice_by_slice_objectness(stack):
+    print(stack.shape)
     objectness = np.zeros_like(stack, dtype=np.float32)
     for z in range(stack.shape[0]):
         curr_slice = stack[z,:,:]

@@ -4,12 +4,14 @@ import os
 import skimage.io as skio
 import skimage.filters as filters
 import skimage.morphology as morph
+import utils
 from segmentation import membranes
 from skimage import img_as_ubyte
 import numpy as np
 import json
 import scipy.ndimage as ndimage
 import gc
+import pandas as pd
 
 # axes are T, (Z), (C), (Y), (X) 
 
@@ -25,36 +27,26 @@ input_path = args.input
 n_timepoints = args.n_timepoints
 reuse_masks = args.reuse_masks
 
-folder_names = input_path.split("/")
-if args.expt_name is None:
-    if folder_names[-1] == "":
-        expt_name = folder_names[-2]
-    else:
-        expt_name = folder_names[-1]
-    expt_name = expt_name.split(".tif")[0]
-else:
-    expt_name = args.expt_name
-print(expt_name)
+expt_name = utils.extract_experiment_name(input_path)
 
 if args.output_folder is None:
-    output_folder = os.path.dirname(input_path)
+    output_folder = input_path
 else:
     output_folder = args.output_folder
 if not os.path.exists(output_folder):
     os.mkdir(output_folder)
-try:
-    os.mkdir(os.path.join(output_folder, "ratios_final"))
-except Exception:
-    pass
-try:
-    os.mkdir(os.path.join(output_folder, "binary_masks"))
-except Exception:
-    pass
+
+print(expt_name)
+print(output_folder)
+
+utils.write_subfolders(output_folder, ["binary_masks"])
 
 n_binary_masks_made = len(os.listdir(os.path.join(output_folder, "binary_masks")))
 
 strel = morph.disk(3)
 strel = strel.reshape([1] + list(strel.shape))
+
+rows = []
 
 for timepoint in range(n_timepoints):
     ratio_raw = skio.imread(os.path.join(input_path, "raw_ratios_medfiltered", "%s_ratio_raw_t%d.tif" % (expt_name, timepoint)))
@@ -65,8 +57,16 @@ for timepoint in range(n_timepoints):
         binary_mask = membranes.raw_membrane_to_mask(raw_membranes, erode=False)
         skio.imsave(os.path.join(output_folder, "binary_masks", "%s_binary_mask_t%d.tif" % (expt_name, timepoint)), img_as_ubyte(binary_mask))
     
+    binary_mask = binary_mask.astype(bool)
     fp_data = skio.imread(os.path.join(input_path, "C1", "%s_C1_t%d.tif") % (expt_name, timepoint))
+    # Currently this method does not account for the surface of the embryo
     expanded_mask = ndimage.binary_dilation(binary_mask, strel)
-    cytosol = expanded_mask-binary_mask
+    cytosol = np.bitwise_and(expanded_mask, np.invert(binary_mask))
 
-    mem_cytosol_ratio = np.mean(fp_data[binary_mask])/np.mean(fp_data[cytosol])
+    mean_mem_intensity = np.mean(fp_data[binary_mask])
+    mean_cytosol_intensity = np.mean(fp_data[cytosol])
+    mem_cytosol_ratio = mean_mem_intensity/mean_cytosol_intensity
+    rows.append([expt_name, timepoint, "Cytosol", mean_cytosol_intensity])
+    rows.append([expt_name, timepoint, "Membrane", mean_mem_intensity])
+df = pd.DataFrame(rows, columns=["Experiment", "Timepoint", "Location", "Mean_Intensity"])
+df.to_csv(os.path.join(output_folder, "results.csv"), index=False)

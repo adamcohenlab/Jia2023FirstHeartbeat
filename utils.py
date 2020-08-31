@@ -1,4 +1,5 @@
 import os
+import numpy as np
 
 def extract_experiment_name(input_path):
     folder_names = input_path.split("/")
@@ -9,7 +10,7 @@ def extract_experiment_name(input_path):
     expt_name = expt_name.split(".tif")[0]
     return expt_name
 
-def write_output_subfolders(output_folder, subfolders):
+def write_subfolders(output_folder, subfolders):
     if not os.path.exists(output_folder):
         os.mkdir(output_folder)
     
@@ -18,3 +19,12 @@ def write_output_subfolders(output_folder, subfolders):
             os.mkdir(os.path.join(output_folder, subfolder))
         except Exception:
             pass
+
+def standardize_n_dims(img):
+    n_axes_to_add = 5 - len(img.shape)
+    if n_axes_to_add < 1:
+        return img
+    else:
+        print(img.shape)
+        print(np.arange(n_axes_to_add))
+        return np.expand_dims(img, tuple(list(np.arange(n_axes_to_add))))
