@@ -1,3 +1,4 @@
 *.csv
 *.tif
+*.xml
 __pycache__/
