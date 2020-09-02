@@ -42,7 +42,7 @@ x_um = args.x_um
 y_um = args.y_um
 z_um = args.z_um
 
-# Dimensions are t, z, x, y, c
+# Dimensions are t, z, c, x, y
 img = imread(input_path)
 n_timepoints = img.shape[0]
 
