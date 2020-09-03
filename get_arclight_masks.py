@@ -3,9 +3,9 @@ import argparse
 import os
 import skimage.io as skio
 import skimage.filters as filters
-from segmentation import membranes
+from spikecounter.segmentation import membranes
 from skimage import img_as_ubyte
-import utils
+import spikecounter.utils as utils
 import numpy as np
 import json
 import gc

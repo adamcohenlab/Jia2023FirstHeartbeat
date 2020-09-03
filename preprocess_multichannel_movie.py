@@ -5,7 +5,7 @@ import skimage.io as skio
 import numpy as np
 import json
 import gc
-import utils
+from spikecounter import utils
 import skimage.morphology as morph
 import skimage.filters as filters
 # axes are T, (Z), (C), (Y), (X) 

@@ -10,6 +10,22 @@ def extract_experiment_name(input_path):
     expt_name = expt_name.split(".tif")[0]
     return expt_name
 
+def make_output_folder(input_path=None, output_path=None):
+    if output_path is None:
+        if os.path.isdir(input_path):
+            output_folder = input_path
+        else:
+            output_folder = os.path.dirname(input_path)
+    else:
+        output_folder = output_path
+    
+    if not os.path.exists(output_folder):
+        os.mkdir(output_folder)
+    if not os.path.isdir(output_folder):
+        raise Exception("Generated output path is not a folder")
+    
+    return output_folder
+
 def write_subfolders(output_folder, subfolders):
     if not os.path.exists(output_folder):
         os.mkdir(output_folder)

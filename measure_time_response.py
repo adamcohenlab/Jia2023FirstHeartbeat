@@ -4,7 +4,7 @@ import skimage.io as skio
 import skimage.filters as filters
 import skimage.morphology as morph
 import os
-from measurement.utils import space_average_over_time
+from spikecounter.measurement.utils import space_average_over_time
 from skimage import img_as_ubyte
 import matplotlib.pyplot as plt
 import pandas as pd

@@ -12,12 +12,12 @@ def subtract_background(img, channels=[0]):
     Background subtraction according to paper that  I don't remember
     """
 
-    bg_subtracted_img = np.zeros_like(img)
+    bg_subtracted_img = np.copy(img)
     n_timepoints = img.shape[0]
     flatdisk = np.zeros((1,5,5))
     flatdisk[0,:,:] = 1
     for c in channels:
-        curr_channel = img[:,c,:,:,:]
+        curr_channel = img[:,:,c,:,:]
 
         n_pixels_zero = np.sum(curr_channel == 0, axis=(1,2,3))
         pct_zeros = n_pixels_zero/curr_channel[0].size*100
@@ -33,15 +33,16 @@ def subtract_background(img, channels=[0]):
 
 
             ## Gaussian blur? Median filter?
-            bg_subtracted_img[t,:,:,:] = filters.median(np.maximum(np.zeros(img.shape[1:]), img[t,:,:,:] - cutoff), selem=flatdisk)
+            bg_subtracted_img[t,:,c,:,:] = filters.median(np.maximum(np.zeros(curr_timepoint.shape), img[t,:,c,:,:] - cutoff), selem=flatdisk)
+    print(bg_subtracted_img.shape)
     
     return bg_subtracted_img
 
-def normalize_intensities(img, pct=100):
+def normalize_intensities(img, pct=100, scale=1):
     """
         Clamp and normalize intensities to a percentile
     """
     normalized_img = np.zeros_like(img)
     for channel in range(img.shape[2]):
-        normalized_img[:, :, channel, :, :] = np.minimum(np.ones_like(img[:,:,channel,:,:]), img[:,:, channel, :, :]/np.percentile(img[:,:, channel, :,:], pct))
+        normalized_img[:, :, channel, :, :] = np.minimum(np.ones_like(img[:,:,channel,:,:]), img[:,:, channel, :, :]/np.percentile(img[:,:, channel, :,:], pct))*scale
     return normalized_img

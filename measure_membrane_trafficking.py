@@ -4,8 +4,8 @@ import os
 import skimage.io as skio
 import skimage.filters as filters
 import skimage.morphology as morph
-import utils
-from segmentation import membranes
+from spikecounter import utils
+from spikecounter.segmentation import membranes
 from skimage import img_as_ubyte
 import numpy as np
 import json
