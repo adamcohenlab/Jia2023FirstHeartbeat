@@ -24,10 +24,7 @@ parser.add_argument("--z_um", help="Z spacing", default=1)
 args = parser.parse_args()
 
 input_path = args.input
-if os.path.isdir(input_path):
-    files = [os.path.join(input_path, f) for f in os.listdir(input_path) if os.path.splitext(f)[1] == ".tif"]
-else:
-    files = [input_path]
+files = utils.generate_file_list(input_path)
 
 print(files)
 

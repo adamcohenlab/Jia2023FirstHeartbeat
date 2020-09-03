@@ -31,6 +31,8 @@ parser.add_argument("--z_um", help="Z spacing", default=1)
 
 args = parser.parse_args()
 input_path = args.input
+files = utils
+
 filename = os.path.splitext(os.path.basename(input_path))[0]
 if args.output_folder is None:
     output_folder = os.path.dirname(input_path)

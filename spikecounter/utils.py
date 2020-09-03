@@ -10,6 +10,13 @@ def extract_experiment_name(input_path):
     expt_name = expt_name.split(".tif")[0]
     return expt_name
 
+def generate_file_list(input_path):
+    if os.path.isdir(input_path):
+        files = [os.path.join(input_path, f) for f in os.listdir(input_path) if os.path.splitext(f)[1] == ".tif"]
+    else:
+        files = [input_path]
+    return files
+
 def make_output_folder(input_path=None, output_path=None):
     if output_path is None:
         if os.path.isdir(input_path):
