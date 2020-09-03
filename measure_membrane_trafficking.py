@@ -66,7 +66,7 @@ for timepoint in range(n_timepoints):
     mean_mem_intensity = np.mean(fp_data[binary_mask])
     mean_cytosol_intensity = np.mean(fp_data[cytosol])
     mem_cytosol_ratio = mean_mem_intensity/mean_cytosol_intensity
-    rows.append([expt_name, timepoint, "Cytosol", mean_cytosol_intensity])
-    rows.append([expt_name, timepoint, "Membrane", mean_mem_intensity])
-df = pd.DataFrame(rows, columns=["Experiment", "Timepoint", "Location", "Mean_Intensity"])
+    rows.append([expt_name, timepoint, "Cytosol", mean_cytosol_intensity, mean_mem_intensity/mean_cytosol_intensity])
+    rows.append([expt_name, timepoint, "Membrane", mean_mem_intensity, mean_mem_intensity/mean_cytosol_intensity])
+df = pd.DataFrame(rows, columns=["Experiment", "Timepoint", "Location", "Mean_Intensity", "MC_Ratio"])
 df.to_csv(os.path.join(output_folder, "results.csv"), index=False)
