@@ -34,7 +34,6 @@ def subtract_background(img, channels=[0]):
 
             ## Gaussian blur? Median filter?
             bg_subtracted_img[t,:,c,:,:] = filters.median(np.maximum(np.zeros(curr_timepoint.shape), img[t,:,c,:,:] - cutoff), selem=flatdisk)
-    print(bg_subtracted_img.shape)
     
     return bg_subtracted_img
 
@@ -46,3 +45,37 @@ def normalize_intensities(img, pct=100, scale=1):
     for channel in range(img.shape[2]):
         normalized_img[:, :, channel, :, :] = np.minimum(np.ones_like(img[:,:,channel,:,:]), img[:,:, channel, :, :]/np.percentile(img[:,:, channel, :,:], pct))*scale
     return normalized_img
+
+def subtract_photobleach(img, n_to_sample=3, channels=[0]):
+    means = np.zeros((img.shape[0], img.shape[2]))
+    for c in range(img.shape[2]):
+        for t in range(img.shape[0]):
+            curr_frame = img[t,:,c,:,:]
+            means[t,c] = np.mean(curr_frame[curr_frame>0])
+    
+    slopes = []
+    flatdisk = np.zeros((1,5,5))
+    flatdisk[0,:,:] = 1
+    
+    ## TODO - fit this scaling locally to account for cell movements
+    for c in range(img.shape[2]):
+        # Should this be an exponential? Probably
+        slope, intercept, r, p, _ = stats.linregress(np.arange(img.shape[0]), y=means[:,c])
+        slopes.append(slope)
+        print(c, slope, intercept, r, p)
+
+    initial_intensities = np.mean(img[:n_to_sample,:,:,:,:], axis=0)
+    scaling = initial_intensities
+    subtracted_img = np.zeros_like(img)
+    for c in range(img.shape[2]):
+        if c in channels:
+            print(c)
+            scaling[:,c,:,:] = initial_intensities[:,c,:,:]/means[0,c]
+            for t in range(img.shape[0]):
+                subtracted_img[t,:,c,:,:] = np.maximum(np.zeros_like(img[t,:,c,:,:]), img[t,:,c,:,:] - scaling[:,c,:,:]*t*slopes[c])
+                subtracted_img[t,:,c,:,:] = filters.median(subtracted_img[t,:,c,:,:], selem=flatdisk)
+        else:
+            subtracted_img[:,:,c,:,:] = img[:,:,c,:,:]
+    
+
+    return subtracted_img

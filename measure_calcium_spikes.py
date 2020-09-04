@@ -63,8 +63,8 @@ for file_path in files:
     # imsave("mean_time.tif", mean_values_over_time.astype(np.uint8))
     # print(mean_values_over_time.shape)
 
-    flatdisk = np.zeros((1,1,9,9))
-    flatdisk[0,0,:,:] = morph.disk(4)
+    flatdisk = np.zeros((1,1,11,11))
+    flatdisk[0,0,:,:] = morph.disk(5)
 
     # mean_threshold = 1
     # for spike_threshold in np.linspace(1,1.5,5):
@@ -81,11 +81,11 @@ for file_path in files:
     spike_threshold = 1.25
     spikes = img > spike_threshold*mean_values_over_time
     spikes = spikes * (mean_values_over_time > mean_threshold)
-    imsave(os.path.join(output_folder, "%s_spikes_%.2f.tif" % (filename, spike_threshold)), utils.img_to_8bit(np.expand_dims(spikes, 2)), imagej=True)
+    imsave(os.path.join(output_folder, "%s_spikes.tif" % (filename)), utils.img_to_8bit(np.expand_dims(spikes, 2)), imagej=True)
     ## Merge spikes in space if detection was done by pixel
     spikes = ndimage.binary_opening(spikes, flatdisk)
     ## Output detected spike mask
-    imsave(os.path.join(output_folder, "%s_spikes_opened_%.2f.tif" % (filename, spike_threshold)), utils.img_to_8bit(np.expand_dims(spikes, 2)), imagej=True)
+    imsave(os.path.join(output_folder, "%s_spikes_opened.tif" % (filename)), utils.img_to_8bit(np.expand_dims(spikes, 2)), imagej=True)
     print(spikes.shape)
     struct = np.zeros((1,3,3,3))
 
@@ -98,7 +98,7 @@ for file_path in files:
     dF[np.isnan(dF)] = 0
     dF[np.isinf(dF)] = 0
     dF = np.maximum(np.zeros_like(dF), dF)
-    imsave(os.path.join(output_folder, "%s_dF_%.2f.tif" % (filename, spike_threshold)), np.expand_dims(dF.astype(np.float32), 2), imagej=True)
+    imsave(os.path.join(output_folder, "%s_dF.tif" % (filename)), np.expand_dims(dF.astype(np.float32), 2), imagej=True)
 
     spikes_labeled_all_times = np.zeros_like(spikes, dtype=np.uint16)
     total_spike_count = 0
@@ -134,4 +134,4 @@ for file_path in files:
     print(np.max(spikes_labeled_all_times))
     print(total_spike_count)
     print(spikes_labeled_all_times.dtype)
-    imsave(os.path.join(output_folder, "%s_spikes_labeled_%.2f.tif" % (filename, spike_threshold)), spikes_labeled_all_times, imagej=True)
+    imsave(os.path.join(output_folder, "%s_spikes_labeled.tif" % (filename)), spikes_labeled_all_times, imagej=True)
