@@ -17,12 +17,15 @@ def generate_file_list(input_path):
         files = [input_path]
     return files
 
-def make_output_folder(input_path=None, output_path=None):
+def make_output_folder(input_path=None, output_path=None, make_folder_from_file=False):
     if output_path is None:
         if os.path.isdir(input_path):
             output_folder = input_path
         else:
-            output_folder = os.path.dirname(input_path)
+            if make_folder_from_file:
+                output_folder = os.path.join(os.path.dirname(input_path), os.path.splitext(os.path.basename(input_path))[0])
+            else:
+                output_folder = os.path.dirname(input_path)
     else:
         output_folder = output_path
     
@@ -51,3 +54,7 @@ def standardize_n_dims(img):
         print(img.shape)
         print(np.arange(n_axes_to_add))
         return np.expand_dims(img, tuple(list(np.arange(n_axes_to_add))))
+
+def img_to_8bit(img):
+    img_8bit = img/np.max(img)*255
+    return img_8bit.astype(np.uint8)
