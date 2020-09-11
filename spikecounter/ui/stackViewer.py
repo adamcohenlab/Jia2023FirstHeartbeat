@@ -227,12 +227,16 @@ class HyperStackViewer(ZStackViewer):
     Z = 1
     C = 2
 
-    def __init__(self, img, width=6, height=6):
+    def __init__(self, img, width=6, height=6, overlay=None):
         super().__init__(img, width, height)
         self._remove_keymap_conflicts({'j', 'k', 'd', 'z', 'x', 'c', 'u', 'i'})
         # Format is T Z C X Y
         self.index = [0, 0, 0]
         self.rgb_on = False
+        if overlay is None:
+            self.overlay = np.zeros(self.img.shape[3], self.img.shape[4])
+        else:
+            self.overlay = overlay
         pass
 
     def select_region_clicky(self):
@@ -240,6 +244,7 @@ class HyperStackViewer(ZStackViewer):
         self.points = []
         fig, ax = plt.subplots(figsize=(self.width, self.height))
         ax.imshow(self._get_curr_slice())
+        ax.imshow(self.overlay, alpha=0.7*(self.overlay !=0), cmap=plt.cm.Blues)
         ax.set_title(self._generate_title_string())
         self.fig = fig
         self.cidclick = fig.canvas.mpl_connect('button_press_event', self._mark_and_record_points_clicky)
@@ -257,6 +262,7 @@ class HyperStackViewer(ZStackViewer):
         return np.tile(in_contour, (self.img.shape[0], self.img.shape[1], self.img.shape[2], 1, 1))
 
     def _get_curr_slice(self):
+        print(self.index)
         if self.rgb_on:
             if self.img.shape[2] == 3:
                 rgb_img = self.img[self.index[0], self.index[1], :, :, :]
