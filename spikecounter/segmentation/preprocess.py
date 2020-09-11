@@ -41,12 +41,27 @@ def normalize_intensities(img, pct=100, scale=1):
     """
         Clamp and normalize intensities to a percentile
     """
+    if type(pct) is (int or float):
+        pct = [pct]*img.shape[2]
+    
     normalized_img = np.zeros_like(img)
     for channel in range(img.shape[2]):
-        normalized_img[:, :, channel, :, :] = np.minimum(np.ones_like(img[:,:,channel,:,:]), img[:,:, channel, :, :]/np.percentile(img[:,:, channel, :,:], pct))*scale
+        normalized_img[:, :, channel, :, :] = np.minimum(np.ones_like(img[:,:,channel,:,:]), img[:,:, channel, :, :]/np.percentile(img[:,:, channel, :,:], pct[channel]))*scale
     return normalized_img
 
-def subtract_photobleach(img, n_to_sample=3, channels=[0]):
+def normalize_intensities_maxproj(img, pct=100, scale=1):
+    """
+        Clamp and normalize intensities to a percentile
+    """
+    if type(pct) is (int or float):
+        pct = [pct]*img.shape[1]
+    
+    normalized_img = np.zeros_like(img)
+    for channel in range(img.shape[1]):
+        normalized_img[:, channel, :, :] = np.minimum(np.ones_like(img[:, channel,:,:]), img[:, channel, :, :]/np.percentile(img[:, channel, :,:], pct[channel]))*scale
+    return normalized_img
+
+def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=5):
     means = np.zeros((img.shape[0], img.shape[2]))
     for c in range(img.shape[2]):
         for t in range(img.shape[0]):
@@ -54,7 +69,7 @@ def subtract_photobleach(img, n_to_sample=3, channels=[0]):
             means[t,c] = np.mean(curr_frame[curr_frame>0])
     
     slopes = []
-    flatdisk = np.zeros((1,5,5))
+    flatdisk = np.zeros((1,filter_size,filter_size))
     flatdisk[0,:,:] = 1
     
     ## TODO - fit this scaling locally to account for cell movements

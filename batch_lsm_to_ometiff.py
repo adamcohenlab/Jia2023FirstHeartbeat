@@ -7,11 +7,17 @@ import tifffile
 import xmltodict
 import bioformats
 import javabridge
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("input", help="Input folder")
+
+args = parser.parse_args()
+# Locate the XML file
+input_path = args.input
 
 javabridge.start_vm(class_path=bioformats.JARS, run_headless=True)
 
-
-input_path = "/mnt/d/Documents/Cohen_Lab/Data/20200901_mosaic_optostim"
 
 maxproj_dir = os.path.join(input_path, "maxproj")
 if not os.path.exists(maxproj_dir):
@@ -26,10 +32,21 @@ for f in os.listdir(input_path):
             print(lsm.shape)
             o = bioformats.OMEXML(bioformats.get_omexml_metadata(full_path))
             pixel_data = o.image(index=0).Pixels
+            # print(dir(pixel_data))
+            # print(pixel_data.get_SizeC())
+            # print(pixel_data.get_SizeT())
+            # print(pixel_data.get_SizeZ())
+            # exit()
 
-            z_axis = 2 if len(lsm.shape) == 6 else 1
+            if len(lsm.shape) == 6:
+                lsm = lsm[0,:,:,:,:,:]
 
-            tifffile.imsave(os.path.join(input_path, "%s.tif" % filename), lsm.squeeze(), imagej=True, metadata={'spacing': pixel_data.PhysicalSizeZ, 'unit': 'um'}, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY))
+            if pixel_data.get_SizeZ() == 1 and pixel_data.get_SizeT() > 1:
+                lsm = np.swapaxes(lsm, 0, 1)
+                print(lsm.shape)
+            z_axis = 1
+
+            tifffile.imsave(os.path.join(input_path, "%s.tif" % filename), lsm, imagej=True, metadata={'spacing': pixel_data.PhysicalSizeZ, 'unit': 'um'}, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY))
             tifffile.imsave(os.path.join(input_path, "maxproj",  "%s_MAX.tif" % filename), lsm.max(axis=z_axis), imagej=True, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY), metadata={'unit': 'um'})
 
 javabridge.kill_vm()
