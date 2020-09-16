@@ -1,59 +1,50 @@
 #! /usr/bin/python3
 import argparse
 import os
-import skimage.io as skio
+from tifffile import imread, imsave
 import numpy as np
 import json
 import gc
+import scipy.ndimage as ndimage
 from spikecounter import utils
 import skimage.morphology as morph
 import skimage.filters as filters
+import spikecounter.segmentation.preprocess as preprocess
 # axes are T, (Z), (C), (Y), (X) 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("input", help="Input file")
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
-
 args = parser.parse_args()
+
 input_path = args.input
+files = utils.generate_file_list(input_path)
+output_folder = utils.make_output_folder(input_path=input_path, output_path=args.output_folder)
+utils.write_subfolders(output_folder, ["medfiltered", "ratios_raw"])
 
-expt_name = utils.extract_experiment_name(input_path)
-
-if args.output_folder is None:
-    output_folder = os.path.join(os.path.dirname(input_path), expt_name)
-else:
-    output_folder = args.output_folder
-if not os.path.exists(output_folder):
-    os.mkdir(output_folder)
-
-utils.write_subfolders(output_folder, ["raw_ratios_medfiltered", "C1_medfiltered", "C2_medfiltered", "C1", "C2"])
-stack = utils.standardize_n_dims(skio.imread(input_path))
-timepoints = stack.shape[0]
 
 
 strel = morph.disk(2)
+strel = strel.reshape([1,1,1] + list(strel.shape))
 
-for timepoint in range(timepoints):
-    C1 = stack[timepoint,:,0,:,:]
-    C2 = stack[timepoint,:,1,:,:]
+for file_path in files:
+    filename = os.path.splitext(os.path.basename(file_path))[0]
+    stack = utils.standardize_n_dims(imread(file_path))
+    # Subtract background
+    background_subtracted = preprocess.subtract_background(stack.astype(np.float32))
+    print("Background subtracted")
+    
+    #Median filter to remove shot noise
+    medfiltered = ndimage.median_filter(background_subtracted, footprint=strel).astype(np.uint8)
+    print("Median filtered")
 
-    C1_medfiltered = np.zeros_like(C1)
-    C2_medfiltered = np.zeros_like(C2)
-    for z in range(C1.shape[0]):
-        C1_medfiltered[z,:,:] = filters.median(C1[z,:,:], strel)
-        C2_medfiltered[z,:,:] = filters.median(C2[z,:,:], strel)
+    imsave(os.path.join(output_folder, "medfiltered", "%s_medfiltered.tif" % (filename)), medfiltered, imagej=True)
+    # Take ratio of green to red
+    ratio = medfiltered[:,:,0,:,:]/medfiltered[:,:,1,:,:]
+    del medfiltered
+    gc.collect()
 
-    ratio = C1_medfiltered/C2_medfiltered
     ratio[np.isnan(ratio)] = 0
     ratio[np.isinf(ratio)] = 0
     ratio = ratio.astype(np.float32)
-
-    skio.imsave(os.path.join(output_folder, "raw_ratios_medfiltered", "%s_ratio_raw_t%d.tif") % (expt_name, timepoint), ratio)
-
-    
-    skio.imsave(os.path.join(output_folder, "C1", "%s_C1_t%d.tif") % (expt_name, timepoint), C1)
-    skio.imsave(os.path.join(output_folder, "C2", "%s_C2_t%d.tif")  % (expt_name, timepoint), C2)
-
-        
-    skio.imsave(os.path.join(output_folder, "C1_medfiltered", "%s_C1_medfiltered_t%d.tif") % (expt_name, timepoint), C1_medfiltered)
-    skio.imsave(os.path.join(output_folder, "C2_medfiltered", "%s_C2_medfiltered_t%d.tif")  % (expt_name, timepoint), C2_medfiltered)
+    imsave(os.path.join(output_folder, "ratios_raw", "%s_ratio_raw.tif" % (filename)), ratio, imagej=True)

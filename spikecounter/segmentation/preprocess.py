@@ -4,18 +4,18 @@ import skimage.filters as filters
 import skimage.morphology as morph
 import scipy.stats as stats
 import scipy.signal as signal
+import scipy.ndimage as ndimage
 import numpy as np
 from .. import utils
 
-def subtract_background(img, channels=[0]):
+def subtract_background(img, channels=[0], median_filter=False, filter_size=3):
     """ 
-    Background subtraction according to paper that  I don't remember
+    Background subtraction according to paper that I don't remember
     """
 
     bg_subtracted_img = np.copy(img)
     n_timepoints = img.shape[0]
-    flatdisk = np.zeros((1,5,5))
-    flatdisk[0,:,:] = 1
+
     for c in channels:
         curr_channel = img[:,:,c,:,:]
 
@@ -33,8 +33,12 @@ def subtract_background(img, channels=[0]):
 
 
             ## Gaussian blur? Median filter?
-            bg_subtracted_img[t,:,c,:,:] = filters.median(np.maximum(np.zeros(curr_timepoint.shape), img[t,:,c,:,:] - cutoff), selem=flatdisk)
-    
+            bg_subtracted_img[t,:,c,:,:] = np.maximum(np.zeros(curr_timepoint.shape), img[t,:,c,:,:] - cutoff)
+        
+        if median_filter:
+            flatdisk = morph.disk(filter_size)
+            flatdisk = flatdisk.reshape([1,1,1] + list(flatdisk.shape))
+            bg_subtracted_img = ndimage.median_filter(bg_subtracted_img, footprint=flatdisk)
     return bg_subtracted_img
 
 def normalize_intensities(img, pct=100, scale=1):
@@ -61,7 +65,7 @@ def normalize_intensities_maxproj(img, pct=100, scale=1):
         normalized_img[:, channel, :, :] = np.minimum(np.ones_like(img[:, channel,:,:]), img[:, channel, :, :]/np.percentile(img[:, channel, :,:], pct[channel]))*scale
     return normalized_img
 
-def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=5):
+def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=3):
     means = np.zeros((img.shape[0], img.shape[2]))
     for c in range(img.shape[2]):
         for t in range(img.shape[0]):
@@ -69,8 +73,8 @@ def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=5):
             means[t,c] = np.mean(curr_frame[curr_frame>0])
     
     slopes = []
-    flatdisk = np.zeros((1,filter_size,filter_size))
-    flatdisk[0,:,:] = 1
+    flatdisk = morph.disk(filter_size)
+    flatdisk = flatdisk.reshape([1,1] + list(flatdisk.shape))
     
     ## TODO - fit this scaling locally to account for cell movements
     for c in range(img.shape[2]):
@@ -88,9 +92,12 @@ def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=5):
             scaling[:,c,:,:] = initial_intensities[:,c,:,:]/means[0,c]
             for t in range(img.shape[0]):
                 subtracted_img[t,:,c,:,:] = np.maximum(np.zeros_like(img[t,:,c,:,:]), img[t,:,c,:,:] - scaling[:,c,:,:]*t*slopes[c])
-                subtracted_img[t,:,c,:,:] = filters.median(subtracted_img[t,:,c,:,:], selem=flatdisk)
+                # subtracted_img[t,:,c,:,:] = filters.median(subtracted_img[t,:,c,:,:], selem=flatdisk)
+            subtracted_img[:,:,c,:,:] = ndimage.median_filter(subtracted_img[:,:,c,:,:],footprint=flatdisk)
         else:
-            subtracted_img[:,:,c,:,:] = img[:,:,c,:,:]
+            se = np.zeros((1,1,3,3))
+            se[0,0,:,:] = 1
+            subtracted_img[:,:,c,:,:] = ndimage.median_filter(img[:,:,c,:,:], footprint=se)
     
 
     return subtracted_img

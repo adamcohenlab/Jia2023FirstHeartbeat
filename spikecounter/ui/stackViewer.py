@@ -324,13 +324,14 @@ class HyperStackViewer(ZStackViewer):
     def _mark_and_record_points_clicky(self, event):
         self.points.append([event.xdata, event.ydata])
         print((event.xdata, event.ydata))
-        fig = event.canvas.figure
-        self._draw_clicky_contour(fig)
-        e = 0.01
-        if len(self.points) > 3 and self._distance(self.points[-1], self.points[-2]) < e:
-            print("Region closed")
-            self._disconnect()
-            plt.close()
+        if event.xdata is not None and event.ydata is not None:
+            fig = event.canvas.figure
+            self._draw_clicky_contour(fig)
+            e = 0.01
+            if len(self.points) > 3 and self._distance(self.points[-1], self.points[-2]) < e:
+                print("Region closed")
+                self._disconnect()
+                plt.close()
 
     def _distance(self, p1, p2):
         return np.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)

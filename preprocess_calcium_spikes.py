@@ -38,7 +38,7 @@ for file_path in files:
     z_um = args.z_um
     # Dimensions are t, z, c, x, y
     img = utils.standardize_n_dims(imread(file_path))
-    background_subtracted = preprocess.subtract_background(img.astype(np.float32))
-    photobleach_accounted = preprocess.subtract_photobleach(background_subtracted, channels=[args.channel])
-    normalized_image = preprocess.normalize_intensities(photobleach_accounted, scale=255, pct=99.999)
-    imsave(os.path.join(output_folder, ("%s_preprocessed.tif" % filename)), normalized_image.astype(np.uint8), imagej=True)
+    background_subtracted = preprocess.subtract_background(img.astype(np.float32), median_filter=True)
+    # photobleach_accounted = preprocess.subtract_photobleach(background_subtracted, channels=[args.channel])
+    normalized_image = preprocess.normalize_intensities(background_subtracted, scale=255, pct=[99.9, 99.999])
+    imsave(os.path.join(output_folder, ("%s_preprocessed_no_pbcorr.tif" % filename)), normalized_image.astype(np.uint8), imagej=True)
