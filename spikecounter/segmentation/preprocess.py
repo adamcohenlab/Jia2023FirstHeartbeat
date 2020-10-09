@@ -8,6 +8,16 @@ import scipy.ndimage as ndimage
 import numpy as np
 from .. import utils
 
+def despeckle(img, channels=[0], filter_size=3):
+    flatdisk = morph.disk(filter_size)
+    flatdisk = flatdisk.reshape([1,1] + list(flatdisk.shape))
+    despeckled_img = np.copy(img)
+    if len(channels) > 0:
+        for channel in channels:
+            print(channel)
+            despeckled_img[:,:,channel,:,:] = ndimage.median_filter(img[:,:,channel,:,:], footprint=flatdisk)
+    return despeckled_img
+
 def subtract_background(img, channels=[0], median_filter=False, filter_size=3):
     """ 
     Background subtraction according to paper that I don't remember
@@ -94,10 +104,5 @@ def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=3):
                 subtracted_img[t,:,c,:,:] = np.maximum(np.zeros_like(img[t,:,c,:,:]), img[t,:,c,:,:] - scaling[:,c,:,:]*t*slopes[c])
                 # subtracted_img[t,:,c,:,:] = filters.median(subtracted_img[t,:,c,:,:], selem=flatdisk)
             subtracted_img[:,:,c,:,:] = ndimage.median_filter(subtracted_img[:,:,c,:,:],footprint=flatdisk)
-        else:
-            se = np.zeros((1,1,3,3))
-            se[0,0,:,:] = 1
-            subtracted_img[:,:,c,:,:] = ndimage.median_filter(img[:,:,c,:,:], footprint=se)
-    
 
     return subtracted_img

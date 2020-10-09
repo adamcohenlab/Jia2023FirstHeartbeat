@@ -234,7 +234,7 @@ class HyperStackViewer(ZStackViewer):
         self.index = [0, 0, 0]
         self.rgb_on = False
         if overlay is None:
-            self.overlay = np.zeros(self.img.shape[3], self.img.shape[4])
+            self.overlay = np.zeros_like(self.img)
         else:
             self.overlay = overlay
         pass
@@ -244,7 +244,8 @@ class HyperStackViewer(ZStackViewer):
         self.points = []
         fig, ax = plt.subplots(figsize=(self.width, self.height))
         ax.imshow(self._get_curr_slice())
-        ax.imshow(self.overlay, alpha=0.7*(self.overlay !=0), cmap=plt.cm.Blues)
+        overlay = self._get_curr_slice(True)
+        ax.imshow(overlay, alpha=0.7*(overlay !=0), cmap=plt.cm.Blues)
         ax.set_title(self._generate_title_string())
         self.fig = fig
         self.cidclick = fig.canvas.mpl_connect('button_press_event', self._mark_and_record_points_clicky)
@@ -256,13 +257,17 @@ class HyperStackViewer(ZStackViewer):
     
     def _points_to_mask(self, points):
         p = Path(points, closed=True)
-        x, y = np.meshgrid(np.arange(self.img.shape[3], dtype=int), np.arange(self.img.shape[4], dtype=int))
+        x, y = np.meshgrid(np.arange(self.img.shape[4], dtype=int), np.arange(self.img.shape[3], dtype=int))
         pix = np.vstack((x.flatten(), y.flatten())).T
-        in_contour = p.contains_points(pix).reshape((self.img.shape[3], self.img.shape[4]))
+        in_contour = p.contains_points(pix)
+        in_contour = in_contour.reshape((self.img.shape[3], self.img.shape[4]))
+
         return np.tile(in_contour, (self.img.shape[0], self.img.shape[1], self.img.shape[2], 1, 1))
 
-    def _get_curr_slice(self):
+    def _get_curr_slice(self, overlay=False):
         print(self.index)
+        if overlay:
+            return self.overlay[self.index[0], self.index[1], 0, :, :]
         if self.rgb_on:
             if self.img.shape[2] == 3:
                 rgb_img = self.img[self.index[0], self.index[1], :, :, :]
@@ -282,10 +287,13 @@ class HyperStackViewer(ZStackViewer):
         self.index[dim] = (self.index[dim] + step_size) % self.img.shape[dim]
         ax.set_title(self._generate_title_string())
         sl = self._get_curr_slice()
+        overlay = self._get_curr_slice(True)
     
         print(np.max(sl))
         print(np.min(sl))
         ax.images[0].set_array(sl)
+        ax.images[1].set_array(overlay)
+        ax.images[1].set_alpha(0.7*(overlay !=0))
         fig.canvas.draw()
 
     def _process_key_points(self, event):

@@ -38,14 +38,23 @@ for file_path in files:
     y_um = args.y_um
     z_um = args.z_um
     # Dimensions are t, z, c, x, y
-    img = utils.standardize_n_dims(imread(file_path))
-    if channel == "all":
-        channel = np.arange(img.shape[2])
-    else:
-        channel = [channel]
+    try:
+        img = utils.standardize_n_dims(imread(file_path))
 
-    background_subtracted = preprocess.subtract_background(img.astype(np.float32))
-    photobleach_accounted = preprocess.subtract_photobleach(background_subtracted, channels=channel, filter_size=3)
-    maxproj = photobleach_accounted.max(axis=1)
-    normalized_image = preprocess.normalize_intensities_maxproj(maxproj, scale=255, pct=[99.99, 99])
-    imsave(os.path.join(output_folder, ("%s_pretty_maxproj.tif" % filename)), normalized_image.astype(np.uint8), imagej=True)
+
+        if channel == "all":
+            channel = np.arange(img.shape[2])
+        elif channel == "none":
+            channel = []
+        else:
+            channel = [int(channel)]
+
+        despeckled = preprocess.despeckle(img, channels=channel)
+        maxproj = despeckled.max(axis=1)
+        maxproj = np.expand_dims(maxproj, axis=1)
+        imsave(os.path.join(output_folder, ("%s_pretty_maxproj.tif" % filename)), maxproj.astype(np.uint8), imagej=True)
+        print(filename)
+
+    except Exception as e:
+        print(str(e))
+        continue

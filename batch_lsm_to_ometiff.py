@@ -28,25 +28,27 @@ for f in os.listdir(input_path):
     if not os.path.isdir(full_path):
         filename, extname = os.path.splitext(f)
         if extname == ".lsm":
-            lsm = tifffile.imread(full_path)
-            print(lsm.shape)
-            o = bioformats.OMEXML(bioformats.get_omexml_metadata(full_path))
-            pixel_data = o.image(index=0).Pixels
-            # print(dir(pixel_data))
-            # print(pixel_data.get_SizeC())
-            # print(pixel_data.get_SizeT())
-            # print(pixel_data.get_SizeZ())
-            # exit()
-
-            if len(lsm.shape) == 6:
-                lsm = lsm[0,:,:,:,:,:]
-
-            if pixel_data.get_SizeZ() == 1 and pixel_data.get_SizeT() > 1:
-                lsm = np.swapaxes(lsm, 0, 1)
+            try:
+                lsm = tifffile.imread(full_path)
                 print(lsm.shape)
-            z_axis = 1
+                o = bioformats.OMEXML(bioformats.get_omexml_metadata(full_path))
+                pixel_data = o.image(index=0).Pixels
+                # print(dir(pixel_data))
+                # print(pixel_data.get_SizeC())
+                # print(pixel_data.get_SizeT())
+                # print(pixel_data.get_SizeZ())
+                # exit()
 
-            tifffile.imsave(os.path.join(input_path, "%s.tif" % filename), lsm, imagej=True, metadata={'spacing': pixel_data.PhysicalSizeZ, 'unit': 'um'}, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY))
-            tifffile.imsave(os.path.join(input_path, "maxproj",  "%s_MAX.tif" % filename), lsm.max(axis=z_axis), imagej=True, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY), metadata={'unit': 'um'})
+                if len(lsm.shape) == 6:
+                    lsm = lsm[0,:,:,:,:,:]
 
+                if pixel_data.get_SizeZ() == 1 and pixel_data.get_SizeT() > 1:
+                    lsm = np.swapaxes(lsm, 0, 1)
+                    print(lsm.shape)
+                z_axis = 1
+
+                tifffile.imsave(os.path.join(input_path, "%s.tif" % filename), lsm, imagej=True, metadata={'spacing': pixel_data.PhysicalSizeZ, 'unit': 'um'}, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY))
+                # tifffile.imsave(os.path.join(input_path, "maxproj",  "%s_MAX.tif" % filename), lsm.max(axis=z_axis), imagej=True, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY), metadata={'unit': 'um'})
+            except Exception:
+                continue
 javabridge.kill_vm()

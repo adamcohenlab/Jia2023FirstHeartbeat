@@ -1,1 +1,1 @@
-__all__ = ["membranes", "preprocess"]
+__all__ = ["membranes", "preprocess", "cells"]
