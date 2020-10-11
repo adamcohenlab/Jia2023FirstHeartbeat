@@ -37,3 +37,15 @@ def remove_evl(img, m, channels=[0], first_z_evl=False, last_z_evl=False, z_scal
             img_evl_removed[t,:,c,:,:] = timepoint
 
     return img_evl_removed.astype(np.uint8)
+
+def label_5d(mask):
+    regions_labeled_all_times = np.zeros_like(mask, dtype=np.uint16)
+    total_regions_count = 0
+    for t in range(mask.shape[0]):
+        for c in range(mask.shape[2]):
+            regions_labeled, n_regions = ndimage.label(mask[t,:,c,:,:])
+            regions_labeled_copy = np.copy(regions_labeled)
+            regions_labeled_copy[regions_labeled_copy > 0] += total_regions_count
+            regions_labeled_all_times[t,:,c,:,:] = regions_labeled_copy
+            total_regions_count += n_regions
+    return regions_labeled_all_times, total_regions_count

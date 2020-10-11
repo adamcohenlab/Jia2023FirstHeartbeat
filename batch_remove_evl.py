@@ -27,9 +27,10 @@ def calculate_cell_intensity_stats(data):
 def fill_mask_clicky(img, mask):
     viewer = stackViewer.HyperStackViewer(img, overlay=np.expand_dims(mask,2))
     clicky_mask = viewer.select_region_clicky()
-    print(clicky_mask.shape)
-    print(mask.shape)
-    return np.logical_or(mask, clicky_mask[:,:,0,:,:])
+    if clicky_mask is None:
+        return mask
+    else:
+        return np.logical_or(mask, clicky_mask[:,:,0,:,:])
 
 ## Get file information
 parser = argparse.ArgumentParser()
@@ -38,7 +39,6 @@ parser.add_argument("channel", help="Spike channel", type=int)
 parser.add_argument("--mask", help="Use mask specified in file to select spikes", default=None, type=str)
 parser.add_argument("--invert_mask", help="Use mask to exclude regions", default=False, type=bool)
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
-parser.add_argument("--is_folder", help="Is the input a folder", default=False)
 parser.add_argument("--x_um", help="X spacing", default=1)
 parser.add_argument("--y_um", help="Y spacing", default=1)
 parser.add_argument("--z_um", help="Z spacing", default=1)
@@ -51,10 +51,7 @@ x_um = args.x_um
 y_um = args.y_um
 z_um = args.z_um
 output_folder = utils.make_output_folder(input_path=input_path, output_path=args.output_folder, make_folder_from_file=True)
-
-print(input_path)
-print(files)
-print(output_folder)
+utils.write_subfolders(output_folder, ["embryo_masks", "evl_removed"])
 
 for file_path in files:
     filename = utils.extract_experiment_name(file_path)
@@ -63,9 +60,8 @@ for file_path in files:
     img = imread(file_path)
     print(img.shape)
     n_timepoints = img.shape[0]
-    mask = cells.get_whole_embryo_mask(img, close_size=15, multiplier=0.3)
+    mask = cells.get_whole_embryo_mask(img, close_size=15, multiplier=0.25)
     mask = fill_mask_clicky(img, mask)
-    imsave(os.path.join(output_folder, "embryo_mask.tif"), mask.astype(np.uint8)*255, imagej=True)
+    imsave(os.path.join(output_folder, "embryo_masks", "%s.tif" % filename), mask.astype(np.uint8)*255, imagej=True)
     img = cells.remove_evl(img, mask, channels=[args.channel], z_scale=2.65, depth=16)
-    imsave(os.path.join(output_folder, "embryo_mask_post_erode.tif"), mask.astype(np.uint8)*255, imagej=True)
-    imsave(os.path.join(output_folder, "evl_removed.tif"), img, imagej=True)
+    imsave(os.path.join(output_folder, "evl_removed", "%s.tif" % filename), img, imagej=True)

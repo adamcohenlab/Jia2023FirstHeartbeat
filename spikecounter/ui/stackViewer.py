@@ -233,13 +233,17 @@ class HyperStackViewer(ZStackViewer):
         # Format is T Z C X Y
         self.index = [0, 0, 0]
         self.rgb_on = False
+        self._marker_string = 'w-'
+        self._target_n_points = None
         if overlay is None:
             self.overlay = np.zeros_like(self.img)
         else:
             self.overlay = overlay
         pass
 
-    def select_region_clicky(self):
+    def select_region_clicky(self, n_points=None):
+        self._target_n_points = n_points
+        self._marker_string = 'w-'
         self.curr_point_artist = None
         self.points = []
         fig, ax = plt.subplots(figsize=(self.width, self.height))
@@ -251,9 +255,32 @@ class HyperStackViewer(ZStackViewer):
         self.cidclick = fig.canvas.mpl_connect('button_press_event', self._mark_and_record_points_clicky)
         self.cidkey = fig.canvas.mpl_connect('key_press_event', self._process_key_points)
         plt.show()
+        if len(self.points) <= 2:
+            return None
         xs, ys =  zip(*self.points)
-        points = [xs, ys]
-        return self._points_to_mask(np.array(points).T)
+        points = np.array([xs, ys]).T
+        # print(points.shape)
+        return self._points_to_mask(points)
+    
+    def select_points_clicky(self, n_points=1):
+        self._marker_string = 'wx'
+        self._target_n_points = n_points
+        self.curr_point_artist = None
+        self.points = []
+        fig, ax = plt.subplots(figsize=(self.width, self.height))
+        ax.imshow(self._get_curr_slice())
+        overlay = self._get_curr_slice(True)
+        ax.imshow(overlay, alpha=0.7*(overlay !=0), cmap=plt.cm.gray)
+        ax.set_title(self._generate_title_string())
+        self.fig = fig
+        self.cidclick = fig.canvas.mpl_connect('button_press_event', self._mark_and_record_points_clicky)
+        self.cidkey = fig.canvas.mpl_connect('key_press_event', self._process_key_points)
+        plt.show()
+        if len(self.points) < 1:
+            return None
+        xs, ys =  zip(*self.points)
+        points = np.array([xs, ys]).T
+        return points
     
     def _points_to_mask(self, points):
         p = Path(points, closed=True)
@@ -265,7 +292,7 @@ class HyperStackViewer(ZStackViewer):
         return np.tile(in_contour, (self.img.shape[0], self.img.shape[1], self.img.shape[2], 1, 1))
 
     def _get_curr_slice(self, overlay=False):
-        print(self.index)
+        # print(self.index)
         if overlay:
             return self.overlay[self.index[0], self.index[1], 0, :, :]
         if self.rgb_on:
@@ -289,8 +316,6 @@ class HyperStackViewer(ZStackViewer):
         sl = self._get_curr_slice()
         overlay = self._get_curr_slice(True)
     
-        print(np.max(sl))
-        print(np.min(sl))
         ax.images[0].set_array(sl)
         ax.images[1].set_array(overlay)
         ax.images[1].set_alpha(0.7*(overlay !=0))
@@ -325,21 +350,25 @@ class HyperStackViewer(ZStackViewer):
         if self.curr_point_artist is not None:
             self.artists[-1].remove()
             self.artists = self.artists[:-1]
-        self.curr_point_artist = ax.plot(xs, ys, 'w-')[0]
+        self.curr_point_artist = ax.plot(xs, ys, self._marker_string)[0]
         self.artists.append(self.curr_point_artist)
         fig.canvas.draw()
 
     def _mark_and_record_points_clicky(self, event):
         self.points.append([event.xdata, event.ydata])
-        print((event.xdata, event.ydata))
+        # print((event.xdata, event.ydata))
         if event.xdata is not None and event.ydata is not None:
             fig = event.canvas.figure
             self._draw_clicky_contour(fig)
             e = 0.01
-            if len(self.points) > 3 and self._distance(self.points[-1], self.points[-2]) < e:
-                print("Region closed")
+            if self._target_n_points is None:
+                if len(self.points) > 3 and self._distance(self.points[-1], self.points[-2]) < e:
+                    print("Region closed")
+                    self._disconnect()
+                    plt.close()
+            elif len(self.points) == self._target_n_points:
                 self._disconnect()
-                plt.close()
+                plt.close()                
 
     def _distance(self, p1, p2):
         return np.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
