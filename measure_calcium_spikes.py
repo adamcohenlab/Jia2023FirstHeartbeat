@@ -133,7 +133,6 @@ for file_path in files:
     flatdisk[0,0,0,:,:] = morph.disk(disk_radius)
     peak_mask = ndimage.binary_opening(peak_mask, flatdisk)
     peak_mask = ndimage.binary_closing(peak_mask, flatdisk)
-    imsave(os.path.join(output_folder, "%s_peaks.tif" % (filename)), peak_mask.astype(np.uint8), imagej=True)
 
 
     viewer = stackViewer.HyperStackViewer(img, overlay=peak_mask)
@@ -152,6 +151,8 @@ for file_path in files:
 
     # Label regions
     peak_labels, n_features = cells.label_5d(peak_mask)
+    imsave(os.path.join(output_folder, "%s_peaks.tif" % (filename)), peak_labels.astype(np.uint16), imagej=True)
+
     # plt.imshow(peak_labels.max(axis=0)[0,0,:,:], cmap=plt.cm.nipy_spectral)
     # plt.show()
 
@@ -179,6 +180,7 @@ for file_path in files:
     spike_coords = ndimage.center_of_mass(peak_mask, labels=peak_labels, index = np.arange(1, n_features+1))
     # print(spike_coords)
     spike_coords = pd.DataFrame(spike_coords, columns=["t", "z", "c", "y", "x"])
+    spike_coords["t_index"] = spike_coords["t"]
     spike_coords["t"] = spike_coords["t"] * dt
     spike_coords["z"] = spike_coords["z"] * z_um
     spike_coords["x"] = spike_coords["x"] * x_um
