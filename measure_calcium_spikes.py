@@ -58,7 +58,9 @@ for file_path in files:
     filename = utils.extract_experiment_name(file_path)
 
     # Dimensions are t, z, c, x, y
-    img = np.expand_dims(imread(file_path)[:,:,args.channel,:,:], 2)
+    img = np.expand_dims(imread(file_path), 1)[:,:,args.channel,:,:]
+    # img = imread(file_path)[:,:,args.channel,:,:]
+    img = np.expand_dims(img, 2)
     n_timepoints = img.shape[0]
 
     ## (Segment cells for long timescales)
@@ -127,12 +129,12 @@ for file_path in files:
     disk_radius = 4
     flatdisk = np.zeros((1,1,1,disk_radius*2+1, disk_radius*2+1))
     flatdisk[0,0,0,:,:] = morph.disk(disk_radius)
-    peak_mask = ndimage.binary_closing(peak_mask, flatdisk)
+    peak_mask = ndimage.binary_closing(peak_mask, flatdisk, border_value=1)
     disk_radius = 2
     flatdisk = np.zeros((1,1,1,disk_radius*2+1, disk_radius*2+1))
     flatdisk[0,0,0,:,:] = morph.disk(disk_radius)
-    peak_mask = ndimage.binary_opening(peak_mask, flatdisk)
-    peak_mask = ndimage.binary_closing(peak_mask, flatdisk)
+    peak_mask = ndimage.binary_opening(peak_mask, flatdisk, border_value=0)
+    peak_mask = ndimage.binary_closing(peak_mask, flatdisk, border_value=1)
 
 
     viewer = stackViewer.HyperStackViewer(img, overlay=peak_mask)

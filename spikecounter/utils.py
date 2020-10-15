@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from skimage import transform
 
 def extract_experiment_name(input_path):
     folder_names = input_path.split("/")
@@ -58,6 +59,20 @@ def standardize_n_dims(img):
 def img_to_8bit(img):
     img_8bit = img/np.max(img)*255
     return img_8bit.astype(np.uint8)
+
+def project_y(img, z_to_x_ratio=1):
+    print(img.shape)
+    max_proj_y = np.expand_dims(img.max(axis=3), 3)
+    max_proj_y = np.swapaxes(max_proj_y, 1, 3)
+    # print(np.max(max_proj_y[:,:,0,:,:]))
+    # print(np.max(max_proj_y[:,:,1,:,:]))
+    # quit()
+    max_proj_y_rescaled = np.zeros((max_proj_y.shape[0], max_proj_y.shape[1], max_proj_y.shape[2], int(np.round(max_proj_y.shape[3]*z_to_x_ratio)), max_proj_y.shape[4]), dtype=max_proj_y.dtype)
+    for t in range(img.shape[0]):
+        for c in range(img.shape[2]):
+            max_proj_y_rescaled[t,0,c,:,:] = transform.resize(max_proj_y[t,0,c,:,:], (int(np.round(max_proj_y.shape[3]*z_to_x_ratio)), max_proj_y.shape[4]), preserve_range=True, order=3)
+    max_proj_y_rescaled = np.flip(max_proj_y_rescaled, axis=3)
+    return max_proj_y_rescaled
 
 def max_entropy(self, raw_img):
     """

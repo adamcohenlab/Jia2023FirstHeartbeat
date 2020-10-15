@@ -24,6 +24,7 @@ starttimes = list(data.index.unique("starttime"))
 vid_lookup = dict(zip(starttimes, [1,2,3,5]))
 
 subdirs = ["E3_heart%d_preprocessed" % e for e in [1,2,3,5]]
+utils.make_output_folder(args.geom_trace_output_folder)
 utils.write_subfolders(args.geom_trace_output_folder, subdirs)
 
 distance_threshold = 8
