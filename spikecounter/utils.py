@@ -130,3 +130,11 @@ def max_entropy(self, raw_img):
             max_ent, threshold = tot_ent, it
 
     return threshold
+
+def transferjob(sourcedir,targetdir):
+    ## Adapted from Daniel Scott Eaton Trenchripper (https://github.com/DanielScottEaton/TrenchRipper)
+    mkdircmd = "mkdir -p " + targetdir
+    rsynccmd = "rsync -r " + sourcedir + "/ " + targetdir
+    wrapcmd = mkdircmd + " && " + rsynccmd
+    cmd = "sbatch -p transfer -t 0-12:00 --wrap=\"" + wrapcmd + "\""
+    os.system(cmd)
