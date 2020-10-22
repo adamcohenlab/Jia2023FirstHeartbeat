@@ -47,7 +47,7 @@ def write_subfolders(output_folder, subfolders):
         except Exception:
             pass
 
-def standardize_n_dims(img):
+def standardize_n_dims(img, missing_dim=None):
     n_axes_to_add = 5 - len(img.shape)
     if n_axes_to_add < 1:
         return img
@@ -73,6 +73,19 @@ def project_y(img, z_to_x_ratio=1):
             max_proj_y_rescaled[t,0,c,:,:] = transform.resize(max_proj_y[t,0,c,:,:], (int(np.round(max_proj_y.shape[3]*z_to_x_ratio)), max_proj_y.shape[4]), preserve_range=True, order=3)
     max_proj_y_rescaled = np.flip(max_proj_y_rescaled, axis=3)
     return max_proj_y_rescaled
+
+def project_x(img, z_to_y_ratio=1):
+    print(img.shape)
+    max_proj_x = np.expand_dims(img.max(axis=4), 4)
+    max_proj_x = np.swapaxes(max_proj_x, 1, 4)
+    # print(np.max(max_proj_x[:,:,0,:,:]))
+    # print(np.max(max_proj_x[:,:,1,:,:]))
+    # quit()
+    max_proj_x_rescaled = np.zeros((max_proj_x.shape[0], max_proj_x.shape[1], max_proj_x.shape[2], max_proj_x.shape[3], int(np.round(max_proj_x.shape[4]*z_to_y_ratio))), dtype=max_proj_x.dtype)
+    for t in range(img.shape[0]):
+        for c in range(img.shape[2]):
+            max_proj_x_rescaled[t,0,c,:,:] = transform.resize(max_proj_x[t,0,c,:,:], (max_proj_x.shape[3], (int(np.round(max_proj_x.shape[4]*z_to_y_ratio)))), preserve_range=True, order=3)
+    return max_proj_x_rescaled
 
 def max_entropy(self, raw_img):
     """

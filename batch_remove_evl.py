@@ -26,7 +26,7 @@ def calculate_cell_intensity_stats(data):
 
 def fill_mask_clicky(img, mask):
     viewer = stackViewer.HyperStackViewer(img, overlay=np.expand_dims(mask,2))
-    clicky_mask = viewer.select_region_clicky()
+    clicky_mask = viewer.select_region_clicky(snap_to_edge=True)
     if clicky_mask is None:
         return mask
     else:
@@ -39,9 +39,10 @@ parser.add_argument("channel", help="Spike channel", type=int)
 parser.add_argument("--mask", help="Use mask specified in file to select spikes", default=None, type=str)
 parser.add_argument("--invert_mask", help="Use mask to exclude regions", default=False, type=bool)
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
-parser.add_argument("--x_um", help="X spacing", default=1)
-parser.add_argument("--y_um", help="Y spacing", default=1)
-parser.add_argument("--z_um", help="Z spacing", default=1)
+parser.add_argument("--start_index", default=0, type=int)
+parser.add_argument("--x_um", help="X spacing", default=1, type=float)
+parser.add_argument("--y_um", help="Y spacing", default=1, type=float)
+parser.add_argument("--z_um", help="Z spacing", default=1, type=float)
 
 args = parser.parse_args()
 input_path = args.input
@@ -53,15 +54,15 @@ z_um = args.z_um
 output_folder = utils.make_output_folder(input_path=input_path, output_path=args.output_folder, make_folder_from_file=True)
 utils.write_subfolders(output_folder, ["embryo_masks", "evl_removed"])
 
-for file_path in files:
+for file_path in files[args.start_index:]:
     filename = utils.extract_experiment_name(file_path)
 
     # Dimensions are t, z, c, x, y
     img = imread(file_path)
     print(img.shape)
     n_timepoints = img.shape[0]
-    mask = cells.get_whole_embryo_mask(img, close_size=15, multiplier=0.25)
+    mask = cells.get_whole_embryo_mask(img, close_size=3, multiplier=0.28)
     mask = fill_mask_clicky(img, mask)
     imsave(os.path.join(output_folder, "embryo_masks", "%s.tif" % filename), mask.astype(np.uint8)*255, imagej=True)
-    img = cells.remove_evl(img, mask, channels=[args.channel], z_scale=2.65, depth=16)
+    img = cells.remove_evl(img, mask, channels=[args.channel], z_scale=z_um/x_um, depth=17)
     imsave(os.path.join(output_folder, "evl_removed", "%s.tif" % filename), img, imagej=True)

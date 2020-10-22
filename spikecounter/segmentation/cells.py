@@ -17,9 +17,15 @@ def get_whole_embryo_mask(img, channel="all", close_size=10, multiplier=0.5):
         channel_img = img[:,:,channel,:,:]
         mask = channel_img > filters.threshold_otsu(channel_img)
     
+    pad_width = close_size+1
+    mask = np.pad(mask, pad_width)
     close_strel = np.zeros((1,1,2*close_size+1,2*close_size+1))
     close_strel[0,0,:,:] = morph.disk(close_size)
-
+    mask = ndimage.binary_closing(mask, close_strel)
+    open_strel = np.zeros((1,1,2*(close_size+1)+1,2*(close_size+1)+1))
+    open_strel[0,0,:,:] = morph.disk((close_size+1))
+    mask = ndimage.binary_opening(mask, open_strel)
+    mask = mask[pad_width:-pad_width,pad_width:-pad_width,pad_width:-pad_width,pad_width:-pad_width]
 
     return mask
 
@@ -30,10 +36,13 @@ def remove_evl(img, m, channels=[0], first_z_evl=False, last_z_evl=False, z_scal
 
     
     for t in range(img.shape[0]):
-        distances = skfmm.distance(mask[t,:,:,:], dx=[z_scale, 1, 1])
+        time_mask = mask[t,:,:,:]
+        time_mask = np.pad(time_mask, depth, constant_values=-1)
+        distances = skfmm.distance(time_mask, dx=[z_scale, 1, 1])
+        distances = distances[depth:-depth, depth:-depth, depth:-depth]
         for c in channels:
             timepoint = img[t,:,c,:,:]
-            timepoint[distances > - depth] = 0 
+            timepoint[distances > - depth] = 0
             img_evl_removed[t,:,c,:,:] = timepoint
 
     return img_evl_removed.astype(np.uint8)

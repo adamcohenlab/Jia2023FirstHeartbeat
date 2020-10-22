@@ -241,7 +241,7 @@ class HyperStackViewer(ZStackViewer):
             self.overlay = overlay
         pass
 
-    def select_region_clicky(self, n_points=None):
+    def select_region_clicky(self, n_points=None, snap_to_edge=False):
         self._target_n_points = n_points
         self._marker_string = 'w-'
         self.curr_point_artist = None
@@ -254,11 +254,23 @@ class HyperStackViewer(ZStackViewer):
         self.fig = fig
         self.cidclick = fig.canvas.mpl_connect('button_press_event', self._mark_and_record_points_clicky)
         self.cidkey = fig.canvas.mpl_connect('key_press_event', self._process_key_points)
+        x_max = ax.get_xlim()[1]
+        y_max = ax.get_ylim()[0]
         plt.show()
         if len(self.points) <= 2:
             return None
         xs, ys =  zip(*self.points)
         points = np.array([xs, ys]).T
+        if snap_to_edge:
+            points[points < 3] = 0
+            x_coords = points[:,0]
+            y_coords = points[:,1]
+            x_coords[x_coords > x_max-3] = x_max
+            y_coords[y_coords > y_max-3] = y_max
+            print(x_coords > x_max-3)
+            print(y_coords > y_max-3)
+            points[:,0] = x_coords
+            points[:,1] = y_coords
         # print(points.shape)
         return self._points_to_mask(points)
     

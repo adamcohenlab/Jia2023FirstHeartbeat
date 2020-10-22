@@ -47,8 +47,8 @@ def subtract_background(img, channels=[0], median_filter=False, filter_size=3):
         
         if median_filter:
             flatdisk = morph.disk(filter_size)
-            flatdisk = flatdisk.reshape([1,1,1] + list(flatdisk.shape))
-            bg_subtracted_img = ndimage.median_filter(bg_subtracted_img, footprint=flatdisk)
+            flatdisk = flatdisk.reshape([1,1] + list(flatdisk.shape))
+            bg_subtracted_img[:,:,c,:,:] = ndimage.median_filter(bg_subtracted_img[:,:,c,:,:], footprint=flatdisk)
     return bg_subtracted_img
 
 def normalize_intensities(img, pct=100, scale=1):
