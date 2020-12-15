@@ -12,11 +12,16 @@ import argparse
 import os
 import spikecounter.segmentation.preprocess as preprocess
 
+
+
 ## Get file information
 parser = argparse.ArgumentParser()
 parser.add_argument("input", help="Input file or folder")
 parser.add_argument("channel", type=int, help="Channel of calcium spikes", default=0)
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
+parser.add_argument("--normalize", type=bool, default=True)
+parser.add_argument("--median_filter", type=bool, default=True)
+parser.add_argument("--bin", type=int, default=1)
 parser.add_argument("--x_um", help="X spacing", default=1)
 parser.add_argument("--y_um", help="Y spacing", default=1)
 parser.add_argument("--z_um", help="Z spacing", default=1)
@@ -29,6 +34,8 @@ files = utils.generate_file_list(input_path)
 print(files)
 
 output_folder = utils.make_output_folder(input_path=input_path, output_path=args.output_folder)
+utils.write_subfolders(output_folder, ["preprocessed"])
+
 
 for file_path in files:
     filename = os.path.splitext(os.path.basename(file_path))[0]
@@ -37,8 +44,23 @@ for file_path in files:
     y_um = args.y_um
     z_um = args.z_um
     # Dimensions are t, z, c, x, y
-    img = utils.standardize_n_dims(imread(file_path))
-    background_subtracted = preprocess.subtract_background(img.astype(np.float32), median_filter=True, channels=[args.channel])
+    img = utils.standardize_n_dims(imread(file_path), missing_dims=[1])
+    if args.bin > 1:
+        if img.shape[-1] % 2 != 0:
+            img = img[:,:,:,:,:-1]
+        if img.shape[-2] % 2 != 0:
+            img = img[:,:,:,:-1,:]
+        print(img.shape)
+        img = img.reshape(list(img.shape[:-1]) + [-1, 2]).sum(axis=-1)
+        print(img.shape)
+        img = img.reshape(list(img.shape[:-2]) + [-1,2,img.shape[-1]]).sum(axis=-2)
+        print(img.shape)
+    background_subtracted = preprocess.subtract_background(img.astype(np.float32), median_filter=args.median_filter, channels=[args.channel])
     # photobleach_accounted = preprocess.subtract_photobleach(background_subtracted, channels=[args.channel])
-    normalized_image = preprocess.normalize_intensities(background_subtracted, scale=255, pct=[99.999, 99.9])
-    imsave(os.path.join(output_folder, ("%s_preprocessed.tif" % filename)), normalized_image.astype(np.uint8), imagej=True)
+    if args.normalize:
+        pct = [99.9999]*img.shape[2]
+        pct[args.channel] = 99.9999
+        normalized_image = preprocess.normalize_intensities(background_subtracted, scale=255, pct=pct)
+    else:
+        normalized_image = background_subtracted
+    imsave(os.path.join(output_folder, "preprocessed", ("%s.tif" % filename)), normalized_image.astype(np.uint8), imagej=True)

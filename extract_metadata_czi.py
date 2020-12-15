@@ -13,12 +13,10 @@ args = parser.parse_args()
 # Locate the XML file
 input_path = args.input
 if os.path.isdir(input_path):
-    expt_name = input_path.split("/")[-2]
-    input_path = os.path.join(input_path, "%s_info.xml" % expt_name)
-    expt_name = re.search(".+(?=-Image Export)", expt_name).group(0)
-    print(expt_name)
+    filelist = os.path.listdir(input_path)
+    
 else:
-    expt_name = re.search(".+(?=)_info.xml", os.path.splitext(os.path.basename(input_path))[0]).group(0)
+    files = [args.input]
 
 if os.path.splitext(os.path.basename(input_path))[1] != ".xml":
     raise Exception("XML input could not be found")

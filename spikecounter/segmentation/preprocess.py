@@ -10,7 +10,8 @@ from .. import utils
 
 def despeckle(img, channels=[0], filter_size=3):
     flatdisk = morph.disk(filter_size)
-    flatdisk = flatdisk.reshape([1,1] + list(flatdisk.shape))
+    flatdisk = flatdisk.reshape([1]*(len(img.shape)-3) + list(flatdisk.shape))
+    print(img.shape)
     despeckled_img = np.copy(img)
     if len(channels) > 0:
         for channel in channels:

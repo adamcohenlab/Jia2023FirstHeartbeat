@@ -5,6 +5,7 @@ from skimage import filters, exposure
 import scipy.ndimage as ndimage
 from frozendict import frozendict
 from matplotlib.path import Path
+from matplotlib.colors import Normalize
 
 class ZStackViewer():
     def __init__(self, img, width=6, height=6):
@@ -241,7 +242,18 @@ class HyperStackViewer(ZStackViewer):
             self.overlay = overlay
         pass
 
-    def select_region_clicky(self, n_points=None, snap_to_edge=False):
+    def view_stack(self):
+        fig, ax = plt.subplots(figsize=(self.width, self.height))
+        ax.imshow(self._get_curr_slice())
+        overlay = self._get_curr_slice(True)
+        ax.imshow(overlay, alpha=0.7*(overlay !=0), cmap=plt.cm.Blues)
+        ax.set_title(self._generate_title_string())
+        self.fig = fig
+        self.cidkey = fig.canvas.mpl_connect('key_press_event', self._process_key_points)
+        plt.show()
+
+
+    def select_region_clicky(self, n_points=None, propagate_z=True, snap_to_edge=False):
         self._target_n_points = n_points
         self._marker_string = 'w-'
         self.curr_point_artist = None
@@ -272,7 +284,7 @@ class HyperStackViewer(ZStackViewer):
             points[:,0] = x_coords
             points[:,1] = y_coords
         # print(points.shape)
-        return self._points_to_mask(points)
+        return self._points_to_mask(points, propagate_z=propagate_z)
     
     def select_points_clicky(self, n_points=1):
         self._marker_string = 'wx'
@@ -294,14 +306,20 @@ class HyperStackViewer(ZStackViewer):
         points = np.array([xs, ys]).T
         return points
     
-    def _points_to_mask(self, points):
+    def _points_to_mask(self, points, propagate_z=True):
         p = Path(points, closed=True)
         x, y = np.meshgrid(np.arange(self.img.shape[4], dtype=int), np.arange(self.img.shape[3], dtype=int))
         pix = np.vstack((x.flatten(), y.flatten())).T
         in_contour = p.contains_points(pix)
         in_contour = in_contour.reshape((self.img.shape[3], self.img.shape[4]))
-
-        return np.tile(in_contour, (self.img.shape[0], self.img.shape[1], self.img.shape[2], 1, 1))
+        
+        if propagate_z:
+            return np.tile(in_contour, (self.img.shape[0], self.img.shape[1], self.img.shape[2], 1, 1))
+        else:
+            mask = np.zeros(self.img.shape, dtype=bool)
+            for c in range(self.img.shape[2]):
+                mask[:,self.index[1],c,:,:] = in_contour
+            return mask, self.index[1]
 
     def _get_curr_slice(self, overlay=False):
         # print(self.index)
@@ -327,10 +345,14 @@ class HyperStackViewer(ZStackViewer):
         ax.set_title(self._generate_title_string())
         sl = self._get_curr_slice()
         overlay = self._get_curr_slice(True)
+        if dim == self.C:
+            new_norm = Normalize(vmin=np.min(self.img[self.index[0],:,self.index[dim],:,:]), vmax=np.max(self.img[self.index[0],:,self.index[dim],:,:]))
+            ax.images[0].set_norm(new_norm)
     
         ax.images[0].set_array(sl)
         ax.images[1].set_array(overlay)
         ax.images[1].set_alpha(0.7*(overlay !=0))
+        
         fig.canvas.draw()
 
     def _process_key_points(self, event):

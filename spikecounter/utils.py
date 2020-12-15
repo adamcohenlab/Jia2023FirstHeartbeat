@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from skimage import transform
+from datetime import datetime
 
 def extract_experiment_name(input_path):
     folder_names = input_path.split("/")
@@ -47,7 +48,11 @@ def write_subfolders(output_folder, subfolders):
         except Exception:
             pass
 
-def standardize_n_dims(img, missing_dim=None):
+def standardize_n_dims(img, missing_dims=None):
+    if missing_dims is not None:
+        img = np.expand_dims(img, tuple(missing_dims))
+    if len(img.shape) == 6:
+        return img[:,0,:,:,:,:]
     n_axes_to_add = 5 - len(img.shape)
     if n_axes_to_add < 1:
         return img
@@ -130,6 +135,9 @@ def max_entropy(self, raw_img):
             max_ent, threshold = tot_ent, it
 
     return threshold
+
+def datestring_to_epoch(s, fmt="%Y-%m-%dT%H:%M:%S"):
+    return datetime.strptime(s, fmt).timestamp()
 
 def transferjob(sourcedir,targetdir):
     ## Adapted from Daniel Scott Eaton Trenchripper (https://github.com/DanielScottEaton/TrenchRipper)
