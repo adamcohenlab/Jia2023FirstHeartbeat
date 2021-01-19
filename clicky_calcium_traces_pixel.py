@@ -6,6 +6,7 @@ from skimage.color import rgb2gray
 from skimage import img_as_ubyte
 import skimage.filters as filters
 import skimage.morphology as morph
+import scipy.ndimage as ndimage
 from skimage.measure import regionprops
 import scipy.stats as stats
 import scipy.signal as signal
@@ -48,8 +49,11 @@ javabridge.start_vm(class_path=bioformats.JARS, run_headless=True)
 def stack_traces_to_pandas(index, traces):
     slice_arrays = []
     for z in range(traces.shape[1]):
-        arr = np.concatenate([np.ones((traces.shape[0],2))*np.array([index, z]), np.arange(traces.shape[0])[:,np.newaxis], traces[:, z][:,np.newaxis]], axis=1)
-        slice_arrays.append(arr)
+        for y in range(traces.shape[2]):
+            for x in range(traces.shape[3]):
+                if not traces.mask[0,z,y,x]:
+                    arr = np.concatenate([np.ones((traces.shape[0],4))*np.array([index, z, x, y]), np.arange(traces.shape[0])[:,np.newaxis], traces[:,z,y,x][:,np.newaxis]], axis=1)
+                    slice_arrays.append(arr)
     return np.concatenate(slice_arrays, axis=0)
 
 for file_path in files:
@@ -98,28 +102,32 @@ for file_path in files:
             mask_map += (mask[0,0,0,:,:].astype(np.uint8)*(i+1))
             region_data.append([props.centroid[1], props.centroid[0], props.area, props.eccentricity])
             print(region_data)
-            masked_img = np.ma.array(img, mask=~mask)
-            masked_img = masked_img[:,:,args.channel,:,:]
-            stack_traces = stack_traces_to_pandas(i, masked_img.mean(axis=(2,3)))
             trace_data.append(stack_traces)
-            n_traces += 1
     else:
         map_path = os.path.join(args.path_to_regions, filename + "_ROIs.tif")
         mask_map = imread(map_path)
-        for i in range(1,np.max(mask_map)+1):
-            mask = mask_map == i
-            mask = np.tile(mask, (img.shape[0], img.shape[1], img.shape[2], 1, 1))
-            masked_img = np.ma.array(img, mask=~mask)
-            masked_img = masked_img[:,:,args.channel,:,:]
-            stack_traces = stack_traces_to_pandas(i-1, masked_img.mean(axis=(2,3)))
-            trace_data.append(stack_traces)
-            n_traces +=1
+
+    # Local mean filter to denoise
+    filter_size = 2
+    flatdisk = morph.disk(filter_size)
+    flatdisk = flatdisk/np.sum(flatdisk)
+    print(flatdisk)
+    flatdisk = flatdisk.reshape([1]*(len(img.shape)-2) + list(flatdisk.shape))
+    img = ndimage.convolve(img, flatdisk)
+    for i in range(1,np.max(mask_map)+1):
+        mask = mask_map == i
+        mask = np.tile(mask, (img.shape[0], img.shape[1], img.shape[2], 1, 1))
+        masked_img = np.ma.array(img, mask=~mask)
+        masked_img = masked_img[:,:,args.channel,:,:]
+        stack_traces = stack_traces_to_pandas(i-1, masked_img)
+        trace_data.append(stack_traces)
+        n_traces += 1
 
     region_data = pd.DataFrame(region_data, columns=["cent_x", "cent_y", "area", "eccentricity"])
-    trace_data = pd.DataFrame(np.concatenate(trace_data, axis=0), columns=["region", "z", "t", "mean_intensity"]).astype({"region": int, "z":int, "t":float, "mean_intensity":float})
+    trace_data = pd.DataFrame(np.concatenate(trace_data, axis=0), columns=["region", "z", "x", "y", "t", "intensity"]).astype({"region": int, "z":int, "x":int, "y":int, "t":float, "intensity":float})
     print(filename)
     print(n_traces)
-    trace_data["t"] = time_array*n_traces
+    trace_data["t"] = time_array*(trace_data.shape[0]//len(time_array))
     
 
     imsave(os.path.join(output_folder, "%s_selected_regions.tif" % (filename)), mask_map, imagej=True)
