@@ -6,5 +6,6 @@
 #SBATCH --mem=16000          # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
-# conda activate bjia
+conda init bash
+conda activate bjia
 python3 SpikeCounter/clicky_calcium_traces_nojvm.py $1 0 --path_to_regions $2 --output_folder $3
