@@ -8,4 +8,4 @@
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 module load matlab/R2018b-fasrc01
 export MATLABPATH="/n/cohen_lab/Lab/Computer Code/Image Processing/"
-matlab -nojvm -nosplash -nodesktop -r "batch_vm_to_tif($1, $2, 1, 1);"
+matlab -nojvm -nosplash -nodesktop -r "batch_vm_to_tif(\'$1\',\'$2\', 1, 1);"
