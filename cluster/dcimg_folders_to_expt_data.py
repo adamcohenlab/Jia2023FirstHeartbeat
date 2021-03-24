@@ -13,6 +13,7 @@ entries = []
 
 for folder in os.listdir(rootpath):
     if os.path.isdir(os.path.join(rootpath, folder)):
+        print(folder)
         res = parse("{hh:2d}{mm:2d}{ss:2d}_p1_t1", folder)
         entries.append(("%2d:%2d:%2d" % (res['hh'], res['mm'], res['ss']), folder))
 
