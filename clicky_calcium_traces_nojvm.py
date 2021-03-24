@@ -1,4 +1,3 @@
-#! /usr/bin/python3
 import numpy as np
 from tifffile import imread, imsave
 import pandas as pd
