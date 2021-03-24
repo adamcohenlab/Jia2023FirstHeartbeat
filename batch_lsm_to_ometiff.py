@@ -46,9 +46,9 @@ for f in os.listdir(input_path):
                     xml_file.write(formatter.format_string(o.to_xml()).decode("utf-8"))
                 pixel_data = o.image(index=0).Pixels
                 # print(dir(pixel_data))
-                # print(pixel_data.get_SizeC())
-                # print(pixel_data.get_SizeT())
-                # print(pixel_data.get_SizeZ())
+                print(pixel_data.get_SizeC())
+                print(pixel_data.get_SizeT())
+                print(pixel_data.get_SizeZ())
                 # exit()
 
                 if len(lsm.shape) == 6:
@@ -59,9 +59,13 @@ for f in os.listdir(input_path):
                         lsm = np.swapaxes(lsm, 0, 1)
                     else:
                         lsm = np.swapaxes(lsm, 0, 2)
-                    print(lsm.shape)
-                z_axis = 1
 
+                    
+                elif pixel_data.get_SizeZ() > 1 and pixel_data.get_SizeC() == 1:
+                    lsm = np.swapaxes(lsm, 1, 2)
+                z_axis = 1
+                print("New shape")
+                print(lsm.shape)
                 tifffile.imsave(os.path.join(input_path, "%s.tif" % filename), lsm, imagej=True, metadata={'spacing': pixel_data.PhysicalSizeZ, 'unit': 'um'}, resolution=(1/pixel_data.PhysicalSizeX, 1/pixel_data.PhysicalSizeY))
             except Exception as e:
                 print(e)

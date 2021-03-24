@@ -14,7 +14,26 @@ def extract_experiment_name(input_path):
 
 def generate_file_list(input_path):
     if os.path.isdir(input_path):
-        files = [os.path.join(input_path, f) for f in os.listdir(input_path) if os.path.splitext(f)[1] == ".tif"]
+        raw_files = sorted([os.path.join(input_path, f) for f in os.listdir(input_path) if os.path.splitext(f)[1] == ".tif"])
+        files = []
+        idx = 0
+        while idx < len(raw_files):
+            if "block" in raw_files[idx]:
+                filename = os.path.splitext(os.path.basename(raw_files[idx]))[0].split("_block")[0]
+                block = [raw_files[idx]]
+                part_of_block = True
+                while part_of_block and idx < len(raw_files)-1:
+                    idx +=1
+                    if filename in raw_files[idx]:
+                        block += [raw_files[idx]]
+                    else:
+                        part_of_block = False
+                        idx -= 1
+                files += [block]
+            else:
+                files += [raw_files[idx]]
+            idx +=1
+
     else:
         files = [input_path]
     return files

@@ -14,8 +14,6 @@ import argparse
 import os
 from spikecounter.ui import HyperStackViewer
 import spikecounter.segmentation.preprocess as preprocess
-import bioformats
-import javabridge
 
 ## Get file information
 parser = argparse.ArgumentParser()
@@ -42,9 +40,6 @@ print(files)
 output_folder = utils.make_output_folder(input_path=input_path, output_path=args.output_folder, make_folder_from_file=True)
 
 
-javabridge.start_vm(class_path=bioformats.JARS, run_headless=True)
-
-
 def stack_traces_to_pandas(index, traces):
     slice_arrays = []
     for z in range(traces.shape[1]):
@@ -61,26 +56,9 @@ for file_path in files:
     else:
         filename = os.path.splitext(os.path.basename(file_path))[0]
         file_path_1 = file_path
-        
-    try:
-        with open(os.path.join(input_path, "%s_meta.xml" % filename)) as f:
-            xml = f.read()
-            
-        metadata = bioformats.OMEXML(xml=xml)
-        pixel_data = metadata.image(index=0).Pixels
-        time_array = []
-        for pidx in range(pixel_data.get_plane_count()):
-            plane = pixel_data.Plane(index=pidx)
-            if int(plane.get_TheC()) == 0:
-                if args.global_delta_t:
-                    time_array.append(float(plane.get_DeltaT()))
-                else:
-                    starttime = utils.datestring_to_epoch(metadata.image(index=0).get_AcquisitionDate())
-                    time_array.append(starttime+float(plane.get_DeltaT()))
-        img = utils.standardize_n_dims(imread(file_path_1), missing_dims=[1,2])
-    except Exception:
-        img = utils.standardize_n_dims(imread(file_path_1), missing_dims=[1,2])
-        n_timepoints = img.shape[0]
+
+    img = utils.standardize_n_dims(imread(file_path_1), missing_dims=[1,2])
+    n_timepoints = img.shape[0]
 
 
     mean_fluorescence = []
@@ -144,8 +122,5 @@ for file_path in files:
     # print(filename)
     # trace_data["t"] = time_array*list(np.arange(n_timepoints))
     
-
-    imsave(os.path.join(output_folder, "%s_selected_regions.tif" % (filename)), mask_map, imagej=True)
     region_data.to_csv(os.path.join(output_folder, "%s_regions.csv" % (filename)), index=False)
     trace_data.to_csv(os.path.join(output_folder, "%s_traces.csv" % (filename)), index=False)
-javabridge.kill_vm()
