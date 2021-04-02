@@ -17,7 +17,8 @@ for folder in os.listdir(rootpath):
         # res = parse("It's {}, I love it!", "It's spam, I love it!")
         res = search("{hh:2d}{mm:2d}{ss:2d}_p1", folder)
         # print(res)
-        entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
+        if res is not None:
+            entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
 
 print(entries)
 df = pd.DataFrame(entries, columns=["start_time", "file_name"])

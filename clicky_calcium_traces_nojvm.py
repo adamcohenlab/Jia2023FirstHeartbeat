@@ -97,19 +97,19 @@ for file_path in files:
             mask = np.tile(mask, (img.shape[0], img.shape[1], img.shape[2], 1, 1))
             masked_img = np.ma.array(img, mask=~mask)
             masked_img = masked_img[:,:,args.channel,:,:]
-            mask_x = np.zeros_like(masked_img)
-            mask_y = np.zeros_like(masked_img)
-            for i in range(mask_coords.shape[2]):
-                for j in range(mask_coords.shape[3]):
-                    if mask[:,:,args.channel,i,j]:
-                        mask_x = [:,:,i,j] = i
-                        mask_y = [:,:,i,j] = j
-            com_x = mask_x*masked_img/np.sum(mask_x)
-            com_y = mask_y*masked_img/np.sum(mask_y)
-            com_x = np.mean(com_x, axis=(2,3))
-            com_y = np.mean(com_x, axis=(2,3))
+            #com_x = np.zeros_like(masked_img)
+            #com_y = np.zeros_like(masked_img)
+            #for i in range(masked_img.shape[2]):
+                #for j in range(masked_img.shape[3]):
+                    #if mask[0,0,args.channel,i,j]:
+            #            com_x[:,:,i,j] = i
+            #            com_y[:,:,i,j] = j
+            #com_x = np.multiply(com_x,masked_img)/np.sum(com_x)
+            #com_y = np.multiply(com_y,masked_img)/np.sum(com_y)
+            #com_x = np.mean(com_x, axis=(2,3))
+            #com_y = np.mean(com_x, axis=(2,3))
             stack_traces = stack_traces_to_pandas(i-1, masked_img.mean(axis=(2,3)))
-            stack_traces = np.concatenate([stack_traces, com_x, com_y], axis=1)
+            #stack_traces = np.concatenate([stack_traces, com_x, com_y], axis=1)
 
 
             trace_data.append(stack_traces)
@@ -130,7 +130,7 @@ for file_path in files:
                 trace_data.append(stack_traces)
             n_timepoints += img.shape[0]
     
-    trace_data = pd.DataFrame(np.concatenate(trace_data, axis=0), columns=["region", "z", "t", "mean_intensity", "com_x", "com_y"]).astype({"region": int, "z":int, "t":float, "mean_intensity":float, "com_x":float, "com_y":float})
+    trace_data = pd.DataFrame(np.concatenate(trace_data, axis=0), columns=["region", "z", "t", "mean_intensity"]).astype({"region": int, "z":int, "t":float, "mean_intensity":float})
     # trace_data = df.
     # print(filename)
     # trace_data["t"] = time_array*list(np.arange(n_timepoints))
