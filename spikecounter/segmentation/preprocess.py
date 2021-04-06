@@ -107,3 +107,20 @@ def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=3):
             subtracted_img[:,:,c,:,:] = ndimage.median_filter(subtracted_img[:,:,c,:,:],footprint=flatdisk)
 
     return subtracted_img
+
+
+def get_region_data(data, mask, region):
+    global_coords = np.argwhere(mask==region)
+    region_data = np.zeros((data.shape[0], global_coords.shape[0]))
+    for px_idx in range(global_coords.shape[0]):
+        px = global_coords[px_idx]
+        region_data[:,px_idx] = data[:,px[0],px[1]]
+    return region_data, global_coords
+
+def generate_cropped_region_image(global_coords, intensity):
+    global_coords_rezeroed = global_coords - np.min(global_coords, axis=0)
+    img = np.zeros(np.max(global_coords_rezeroed, axis=0)+1)
+    for idx in range(len(intensity)):
+        px = global_coords_rezeroed[idx,:]
+        img[px[0], px[1]] = intensity[idx]
+    return img
