@@ -2,6 +2,8 @@ import os
 import numpy as np
 from skimage import transform
 from datetime import datetime
+import matplotlib.pyplot as plt
+from ipywidgets import interact
 
 def extract_experiment_name(input_path):
     folder_names = input_path.split("/")
@@ -165,3 +167,14 @@ def transferjob(sourcedir,targetdir):
     wrapcmd = mkdircmd + " && " + rsynccmd
     cmd = "sbatch -p transfer -t 0-12:00 --wrap=\"" + wrapcmd + "\""
     os.system(cmd)
+
+def display_zstack(stack, z=0, c="all"):
+    def view_image(z, c):
+        if c=="all":
+            img = stack[z,:,:,:]
+        else:
+            img = stack[z,:,:,int(c)]
+        plt.imshow(img, interpolation="nearest")
+        plt.title("Z: %d C: %s" %(z, str(c)))
+        plt.show()
+    interact(view_image, z=(0,stack.shape[0]-1), c=["all"] + list(np.arange(stack.shape[-1])))
