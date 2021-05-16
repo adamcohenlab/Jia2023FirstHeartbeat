@@ -104,12 +104,13 @@ for file_path in files:
             for px_idx in range(mask_indices.shape[0]):
                 px = mask_indices[px_idx,:]
                 y = px[0]
-                x = px[1]
-                com_x += x*masked_img[:,0,y,x][:,np.newaxis]
-                com_y += y*masked_img[:,0,y,x][:,np.newaxis]
-            mass = masked_img.sum(axis=(2,3))
+                x = px[1] 
+                intensity = masked_img[:,0,y,x][:,np.newaxis].astype(float)  
+                com_x += float(x)*intensity
+                com_y += float(y)*intensity
+            mass = masked_img.sum(axis=(2,3))  
             com_x = com_x/mass
-            com_y = com_y/mass
+            com_y = com_y/mass 
             stack_traces = stack_traces_to_pandas(i-1, masked_img.mean(axis=(2,3)))
             stack_traces = np.concatenate([stack_traces, com_x, com_y], axis=1)
 

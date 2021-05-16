@@ -71,14 +71,15 @@ for idx, file_path in enumerate(files):
 
     # Select region to analyze
 
-    viewer = stackViewer.HyperStackViewer(img)
-    mask = viewer.select_region_clicky()
-    if args.analyze_max_proj:
-        img = np.expand_dims(img.max(axis=1), 1)
-    else:
-        mask = np.tile(mask, (1, img.shape[1], 1, 1, 1))
-    imsave(os.path.join(output_folder, "%s_regions.tif" % (filename)), mask[0,0,0,:,:].astype(np.uint8), imagej=True)
+    # viewer = stackViewer.HyperStackViewer(img)
+    # mask = viewer.select_region_clicky()
+    # if args.analyze_max_proj:
+    #     img = np.expand_dims(img.max(axis=1), 1)
+    # else:
+    #     mask = np.tile(mask, (1, img.shape[1], 1, 1, 1))
+    # imsave(os.path.join(output_folder, "%s_regions.tif" % (filename)), mask[0,0,0,:,:].astype(np.uint8), imagej=True)
     
+    mask = None
 
     if mask is None:
         max_value = np.percentile(img, 99.999)
@@ -92,9 +93,11 @@ for idx, file_path in enumerate(files):
 
     spikes = img > thresholds[idx]
     spike_areas = np.sum(spikes, axis=(1,2,3,4))
-    plt.plot(spike_areas)
+    masked_img = np.ma.array(img, mask=~spikes)
+    mean_spike_intensity = masked_img.mean(axis=(1,2,3,4))
+    # plt.plot(spike_areas)
 
-    viewer = stackViewer.HyperStackViewer(img)
-    viewer.view_stack()
-    df = pd.DataFrame(spike_areas, columns=["area_px"])
+    # viewer = stackViewer.HyperStackViewer(img)
+    # viewer.view_stack()
+    df = pd.DataFrame(np.concatenate([spike_areas[:,np.newaxis], mean_spike_intensity[:,np.newaxis]], axis=1), columns=["area_px", "mean_intensity"])
     df.to_csv(os.path.join(output_folder, "%s_areas.csv" % filename), index=False)
