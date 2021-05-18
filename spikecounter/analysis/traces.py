@@ -34,7 +34,7 @@ def standard_lp_filter(raw, norm_thresh=0.5):
     # intensity = signal.filtfilt(b, a, intensity)
     return intensity
 
-def analyze_peaks(trace, prominence="auto", wlen=400, f_s=1):
+def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1):
     """ Analyze peaks within a given trace and return the following statistics, organized in a pandas DataFrame:
 
     peak_idx: index where each peak is
@@ -48,10 +48,13 @@ def analyze_peaks(trace, prominence="auto", wlen=400, f_s=1):
         p = prominence
 
     peaks, properties = signal.find_peaks(trace, prominence=p, height=0, wlen=wlen)
+    peaks = peaks[trace[peaks]>threshold]
     fwhm = signal.peak_widths(trace, peaks, rel_height=0.5)[0]/f_s
     isi = (peaks[1:] - peaks[:-1])/f_s
     isi = np.append(isi, np.nan)
-    res = pd.DataFrame({"peak_idx": peaks, "prominence": properties["prominences"], "fwhm": fwhm, "isi": isi})
+    prominences = np.array(properties["prominences"])
+    prominences = prominences[trace[peaks]>threshold]
+    res = pd.DataFrame({"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi})
     return res
 
 def first_trough_exp_fit(st_traces, before, after, f_s=1):
@@ -288,10 +291,10 @@ class TimelapseArrayExperiment():
         self.n_rois = dFF_interp.shape[0]
         self.data_loaded = True
     
-    def analyze_peaks(self, prominence="auto", wlen=400):
+    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0):
         dfs = []
         for roi in range(self.n_rois):
-            df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, f_s=self.f_s)
+            df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold, f_s=self.f_s)
             df["t"] = self.t[df["peak_idx"]]
             df["roi"] = roi
             dfs.append(df)
@@ -319,19 +322,17 @@ class TimelapseArrayExperiment():
                 mask = (peak_indices >= wi)*(peak_indices < (wi+window))
                 for edge_pair in segment_edges:
                     if edge_pair[1] >= wi and edge_pair[1] < wi+window:
-                        negdist = np.minimum(peak_indices-edge_pair[1], 0.1)
-                        sorted_indices = np.argsort(-negdist)
-                        sorted_distances = negdist[sorted_indices]
-
-                        nearest_idx = np.argwhere(sorted_distances<0.1)
-                        if len(nearest_idx) > 0:
-                            nearest_lower_peak = sorted_indices[np.argwhere(sorted_distances<0.1)[0]]
-                            mask[nearest_lower_peak] = False
+                        nearest_lower_peak = np.argwhere(peak_indices-edge_pair[1] > 0)[0] - 1
+                        mask[nearest_lower_peak] = False
+                            # return None
                 if sta_after+sta_before > 0:
                     sta_stats = True
                 else:
                     sta_stats = False
                 
+                
+                # print(wi_idx, np.sum(mask))
+
                 roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(peak_data, mask, f_s=self.f_s, \
                     sta_stats=sta_stats, trace=self.dFF[roi,:], sta_before=sta_before, sta_after=sta_after, min_peaks=isi_stat_min_peaks)
                 
