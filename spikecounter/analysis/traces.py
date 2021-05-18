@@ -58,6 +58,9 @@ def first_trough_exp_fit(st_traces, before, after, f_s=1):
     """ Fit an exponential to a detected peak up to the first trough
 
     """
+    if st_traces.shape[0] == 0:
+        return pd.Series({"alpha":np.nan, "c":np.nan, "alpha_err":np.nan, "c_err":np.nan})
+    
     sta = np.nanmean(st_traces, axis=0)
     relmin, _ = signal.find_peaks(1-sta, height=0.5)
     
@@ -67,6 +70,7 @@ def first_trough_exp_fit(st_traces, before, after, f_s=1):
         relmin = len(sta)-before
     ts = np.tile(np.arange(relmin)/f_s,st_traces.shape[0])
     ys = st_traces[:,before:relmin+before].ravel()
+
     popt, pcov = optimize.curve_fit(lambda x, alpha, c: np.exp(-alpha*x) + c, ts, ys, p0=[0.6, 0.2])
 
     alpha = popt[0]
@@ -80,7 +84,6 @@ def analyze_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True
     """ Generate spike-triggered average from trace and indices of peaks, as well as associated statistics
 
     """
-
     spike_traces = np.ones((len(peak_indices), before+after))*np.nan
     for pk_idx, pk in enumerate(peak_indices):
         spike_trace = np.concatenate([np.ones(max(before - pk, 0))*np.nan,
@@ -89,9 +92,12 @@ def analyze_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True
         if normalize_height:
             spike_trace /= np.nanmax(spike_trace)
         spike_traces[pk_idx,:] = spike_trace
-    
-    sta = np.nanmean(spike_traces, axis=0)
-    ststd = np.nanstd(spike_traces, axis=0)
+    if len(peak_indices) == 0:
+        sta = np.nan*np.ones(before+after)
+        ststd = np.nan*np.ones(before+after)
+    else:
+        sta = np.nanmean(spike_traces, axis=0)
+        ststd = np.nanstd(spike_traces, axis=0)
 
     sta_stats = fitting_function(spike_traces, before, after, f_s=f_s)
     return sta, ststd, sta_stats
@@ -147,10 +153,12 @@ class TimelapseArrayExperiment():
         self.f_s = f_s
         self.block_metadata = self._load_block_metadata(self.data_folder, self.start_hpf)
         self.data_loaded = False
+        self.peaks_found = False
         self.t = None
         self.raw = None
         self.dFF = None
         self.missing_data = None
+        self.peaks_data = None
     
     def filter_timepoints(self, timepoints):
         """ Throw out timepoints with bad data
@@ -247,7 +255,8 @@ class TimelapseArrayExperiment():
                 background=np.apply_along_axis(filter_function, 1, background_blocks[idx])
             else:
                 background = np.zeros_like(data_blocks[idx])
-            dFFs = np.apply_along_axis(intensity_to_dff, 1, data_blocks[idx]-background)
+            filtered_intensity = np.apply_along_axis(filter_function, 1, data_blocks[idx])
+            dFFs = np.apply_along_axis(intensity_to_dff, 1, filtered_intensity-background)
             dFF_blocks.append(dFFs)
 
         data_blocks = np.concatenate(data_blocks, axis=1)
@@ -278,19 +287,30 @@ class TimelapseArrayExperiment():
         self.missing_data = missing_data
         self.n_rois = dFF_interp.shape[0]
         self.data_loaded = True
+    
+    def analyze_peaks(self, prominence="auto", wlen=400):
+        dfs = []
+        for roi in range(self.n_rois):
+            df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, f_s=self.f_s)
+            df["t"] = self.t[df["peak_idx"]]
+            df["roi"] = roi
+            dfs.append(df)
+        self.peaks_data = pd.concat(dfs, axis=0).set_index("roi")
+        self.peaks_found = True
 
+    def get_windowed_peak_stats(self, window, prominence="auto", overlap=0.5, isi_stat_min_peaks=7, sta_before=0, sta_after=0, wlen=400):
+        if not self.peaks_found:
+            raise Exception("Peaks not found")
 
-    def get_windowed_peak_stats(self, window, prominence="auto", overlap=0.5, sta_before=50, sta_after=10, wlen=400):
         sta_embryos = {}
         ststd_embryos = {}
         spike_stats_by_roi = []
         segment_edges = self._find_segment_edges()
 
         for roi in range(self.n_rois):
-            trace = self.dFF[roi,:]
-            peak_data = analyze_peaks(trace, prominence=prominence, wlen=wlen)
+            peak_data = self.peaks_data.loc[roi]
             peak_indices = np.array(peak_data["peak_idx"])
-            window_indices = np.arange(0, len(trace)-window, step=int(window - overlap*window))
+            window_indices = np.arange(0, self.dFF.shape[1]-window, step=int(window - overlap*window))
             
             sta = np.zeros((len(window_indices), sta_before+sta_after))
             ststd = np.zeros((len(window_indices), sta_before+sta_after))
@@ -302,12 +322,23 @@ class TimelapseArrayExperiment():
                         negdist = np.minimum(peak_indices-edge_pair[1], 0.1)
                         sorted_indices = np.argsort(-negdist)
                         sorted_distances = negdist[sorted_indices]
-                        nearest_lower_peak = sorted_indices[np.argwhere(sorted_distances<0.1)[0][0]]
-                        mask[nearest_lower_peak] = False
+
+                        nearest_idx = np.argwhere(sorted_distances<0.1)
+                        if len(nearest_idx) > 0:
+                            nearest_lower_peak = sorted_indices[np.argwhere(sorted_distances<0.1)[0]]
+                            mask[nearest_lower_peak] = False
+                if sta_after+sta_before > 0:
+                    sta_stats = True
+                else:
+                    sta_stats = False
+                
                 roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(peak_data, mask, f_s=self.f_s, \
-                    sta_stats=True, trace=trace,sta_before=sta_before, sta_after=sta_after)
-                roi_spike_stats["offset"] = self.t[wi_idx]
+                    sta_stats=sta_stats, trace=self.dFF[roi,:], sta_before=sta_before, sta_after=sta_after, min_peaks=isi_stat_min_peaks)
+                
+
+                roi_spike_stats["offset"] = self.t[wi]
                 roi_spike_stats["roi"] = roi
+                roi_spike_stats["mean_freq"] = roi_spike_stats["n_peaks"]/(window - np.sum(self.missing_data[wi:wi+window]))*self.f_s
 
                 sta[wi_idx,:] = roi_sta
                 ststd[wi_idx,:] = roi_ststd
@@ -315,8 +346,9 @@ class TimelapseArrayExperiment():
 
             sta_embryos[roi] = sta
             ststd_embryos[roi] = ststd
-                
-        return roi_spike_stats, sta_embryos, ststd_embryos
+        
+        spike_stats_by_roi = pd.DataFrame(spike_stats_by_roi)
+        return spike_stats_by_roi, sta_embryos, ststd_embryos
 
     def plot_raw_and_dff(self, roi):
         return 0

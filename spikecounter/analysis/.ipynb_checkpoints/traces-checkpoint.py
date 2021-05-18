@@ -299,11 +299,19 @@ class TimelapseArrayExperiment():
                 mask = (peak_indices >= wi)*(peak_indices < (wi+window))
                 for edge_pair in segment_edges:
                     if edge_pair[1] >= wi and edge_pair[1] < wi+window:
+#                         print(edge_pair[1])
+#                         print(wi)
+#                         print(peak_indices-edge_pair[1])
                         negdist = np.minimum(peak_indices-edge_pair[1], 0.1)
                         sorted_indices = np.argsort(-negdist)
                         sorted_distances = negdist[sorted_indices]
-                        nearest_lower_peak = sorted_indices[np.argwhere(sorted_distances<0.1)[0][0]]
-                        mask[nearest_lower_peak] = False
+#                         print(sorted_distances)
+#                         print(sorted_distances.shape)
+#                         print(np.argwhere(sorted_distances<0.1))
+                        nearest_idx = np.argwhere(sorted_distances<0.1)
+                        if len(nearest_idx) > 0:
+                            nearest_lower_peak = sorted_indices[np.argwhere(sorted_distances<0.1)[0]]
+                            mask[nearest_lower_peak] = False
                 roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(peak_data, mask, f_s=self.f_s, \
                     sta_stats=True, trace=trace,sta_before=sta_before, sta_after=sta_after)
                 roi_spike_stats["offset"] = self.t[wi_idx]
