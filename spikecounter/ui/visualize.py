@@ -12,3 +12,6 @@ def display_roi_overlay(img, mask, textcolor="white", alpha=0.5):
         centroid = obj.centroid
         ax1.text(centroid[1], centroid[0], str(idx+1), color=textcolor)
     return fig1, ax1
+
+def get_line_labels(lns):
+    return [l.get_label() for l in lns]

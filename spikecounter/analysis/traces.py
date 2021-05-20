@@ -6,6 +6,8 @@ from scipy import optimize
 import matplotlib.pyplot as plt
 from datetime import datetime
 import os
+from ..ui import visualize
+from .. import utils
 plt.style.use(os.path.join(os.path.dirname(__file__), "../report.mplstyle"))
 
 def intensity_to_dff(intensity, percentile_threshold=10, moving_average=False, window=None):
@@ -162,6 +164,8 @@ class TimelapseArrayExperiment():
         self.dFF = None
         self.missing_data = None
         self.peaks_data = None
+
+        self.hpf_tag = "Hours post fertilization"
     
     def filter_timepoints(self, timepoints):
         """ Throw out timepoints with bad data
@@ -182,7 +186,7 @@ class TimelapseArrayExperiment():
         return fig1, ax1
 
     def load_traces(self, filter_function=standard_lp_filter, timepoints=None, per_trace_start=0, background_subtract=False, \
-        scale_lowest_mean=False, end_index=0, custom_timepoints=[], custom_preprocessing_functions = []):
+        scale_lowest_mean=False, end_index=0, custom_timepoints=[], custom_preprocessing_functions = [], ma_window=400):
         """ Load and merge traces from individual data CSVs containing time blocks for arrays of embryos.
         """
         if timepoints is None:
@@ -351,8 +355,84 @@ class TimelapseArrayExperiment():
         spike_stats_by_roi = pd.DataFrame(spike_stats_by_roi)
         return spike_stats_by_roi, sta_embryos, ststd_embryos
 
-    def plot_raw_and_dff(self, roi):
-        return 0
+    ### Plotting functions ###
+    def plot_raw_and_dff(self, roi, figsize=(12,6), time="s"):
+        """ Plot DF/F and raw traces over all blocks
+        """
+        t, timeseries_start = self._get_time(time)
+
+        fig1, ax1 = plt.subplots(figsize=figsize)
+        ax2 = ax1.twinx()
+        ls = []
+        ls.extend(ax1.plot(t, self.raw[roi,:], label="Counts"))
+        ls.extend(ax2.plot(t,self.dFF[roi,:], color="C1", label=r"$\Delta F/F$"))
+        labels = visualize.get_line_labels(ls)
+
+        for offset in timeseries_start:
+            ax1.axvline(offset, color="black")
+        
+        ax1.set_xlabel("Time (%s)" % time)
+        ax1.set_ylabel("Raw")
+        ax2.set_xlabel(r"$\Delta F/F$")
+        ax2.legend(ls, labels)
+
+        return fig1, ax1
+    
+
+    def plot_spikes(self, roi, figsize=(12,6), time="s"):
+        """Plot spikes found using find_peaks on DF/F 
+        
+        """
+        t, _ = self._get_time(time)
+        roi_peaks = self.peaks_data.loc[roi]
+        peak_indices = roi_peaks["peak_idx"]
+        
+        fig1, ax1 = plt.subplots(figsize=figsize)
+        ax1.plot(t, self.dFF[roi,:])
+        ax1.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
+        
+        ax1.set_xlabel("Time (%s)" % time)
+        ax1.set_ylabel(r"$\Delta F/F$")
+        return fig1, ax1
+
+    def plot_peak_quality_metrics(self, rois, figsize=(10,10)):
+        """ Plot peak quality metrics:
+
+        Distribution of DF/F of segmented peaks
+        """
+        fig1, axes = plt.subplots(2,2, figsize=figsize)
+        axes = axes.ravel()
+        
+        roi_it = utils.convert_to_iterable(rois)
+        for roi in roi_it:
+            roi_peaks = self.peaks_data.loc[roi]
+            peak_indices = roi_peaks["peak_idx"]
+            axes[0].hist(self.dFF[roi,peak_indices], bins=50, cumulative=True, density=True)
+            axes[0].set_xlabel(r"$\Delta F/F$")
+            axes[0].set_ylabel("CDF")
+            
+            axes[1].hist(self.dFF[roi,peak_indices], bins=50, density=True)
+            axes[1].set_xlabel(r"$\Delta F/F$")
+            axes[1].set_ylabel("PDF")
+
+            axes[2].scatter()
+        return fig1, axes
+
+
+    def _get_time(self, time):
+        """Returns t, timeseries_start
+
+        Returns time in hpf or seconds as well as start of each timeblock
+        """
+        if time=="s":
+            t = self.t
+            timeseries_start = self.block_metadata["offset"]
+        elif time=="hpf":
+            t = self.t/3600 + self.start_hpf
+            timeseries_start = self.block_metadata["hpf"]
+        else:
+            raise Exception("Invalid time unit")
+        return t, timeseries_start
     
     def _find_segment_edges(self):
         missing_edges = self.missing_data[1:] - self.missing_data[:-1]

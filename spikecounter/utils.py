@@ -178,3 +178,10 @@ def display_zstack(stack, z=0, c="all"):
         plt.title("Z: %d C: %s" %(z, str(c)))
         plt.show()
     interact(view_image, z=(0,stack.shape[0]-1), c=["all"] + list(np.arange(stack.shape[-1])))
+
+def convert_to_iterable(x):
+    try:
+        iterator = iter(x)
+    except TypeError:
+        iterator = iter([x])
+    return iterator
