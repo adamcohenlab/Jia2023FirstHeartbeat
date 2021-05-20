@@ -395,30 +395,82 @@ class TimelapseArrayExperiment():
         ax1.set_ylabel(r"$\Delta F/F$")
         return fig1, ax1
 
-    def plot_peak_quality_metrics(self, rois, figsize=(10,10)):
+    def plot_peak_quality_metrics(self, rois, figsize=(10,10), ma_window=400, time="hpf"):
         """ Plot peak quality metrics:
 
-        Distribution of DF/F of segmented peaks
+        Distribution of DF/F of segmented peaks (CDF and PDF), to ensure that cutoffs are appropriate
+        DF/F compared to F, to show that peak intensity is independent of raw fluorescence
+        Fluorescence of spike and average over time - does ratio of spike to baseline change over time 
+
         """
+        t, _ = self._get_time(time)
+        fig1, axes = plt.subplots(2,2, figsize=figsize)
+        axes = axes.ravel()
+
+        axes[0].set_xlabel(r"$\Delta F/F$")
+        axes[0].set_ylabel("CDF")
+        
+        axes[1].set_xlabel(r"$\Delta F/F$")
+        axes[1].set_ylabel("PDF")
+
+        axes[2].set_xlabel(r"$\Delta F/F$")
+        axes[2].set_ylabel("F")
+
+        axes[3].set_xlabel("Time (%s)" % time)
+        axes[3].set_ylabel("F")
+        
+        roi_it = utils.convert_to_iterable(rois)
+        for idx, roi in enumerate(roi_it):
+            roi_peaks = self.peaks_data.loc[roi]
+            peak_indices = roi_peaks["peak_idx"]
+            # Should I be taking the local percentile here?
+            ma = signal.convolve(self.raw[roi,:], np.ones(ma_window)/ma_window, 'same')
+            
+            axes[0].hist(self.dFF[roi,peak_indices], bins=50, cumulative=True, density=True, alpha=0.5)
+
+            
+            axes[1].hist(self.dFF[roi,peak_indices], bins=50, density=True, alpha=0.5)
+
+
+            axes[2].scatter(self.dFF[roi, peak_indices], self.raw[roi, peak_indices])
+
+
+            axes[3].scatter(t[peak_indices], ma[peak_indices], color="C%d" %idx, label="E%d" %(roi+1),s=5,linewidth=1)
+            axes[3].scatter(t[peak_indices], self.raw[roi,peak_indices], color="C%d" %idx, marker="+", s=5, linewidth=1)
+        return fig1, axes
+    
+    def plot_power_spectra(self, rois, tmin, tmax, figsize=(12,12)):
+        """ Plot power spectra using welch and periodogram methods for a given window
+
+        For evaluating noise
+        """
+        tidx_min = np.argwhere(self.t>tmin)[0][0]
+        tidx_max = np.argwhere(self.t>tmax)[0][0]
+        
         fig1, axes = plt.subplots(2,2, figsize=figsize)
         axes = axes.ravel()
         
+        axes[0].set_xlabel("Time (s)")
+        axes[0].set_ylabel("F")
+
+        axes[1].set_xlabel("Frequency (Hz)")
+        axes[1].set_ylabel(r"$S_{xx}(f)$")
+        axes[1].set_title("Welch")
+
+        axes[2].set_xlabel("Frequency (Hz)")
+        axes[2].set_ylabel(r"$S_{xx}(f)$")
+        axes[2].set_title("Periodogram")
         roi_it = utils.convert_to_iterable(rois)
-        for roi in roi_it:
-            roi_peaks = self.peaks_data.loc[roi]
-            peak_indices = roi_peaks["peak_idx"]
-            axes[0].hist(self.dFF[roi,peak_indices], bins=50, cumulative=True, density=True)
-            axes[0].set_xlabel(r"$\Delta F/F$")
-            axes[0].set_ylabel("CDF")
-            
-            axes[1].hist(self.dFF[roi,peak_indices], bins=50, density=True)
-            axes[1].set_xlabel(r"$\Delta F/F$")
-            axes[1].set_ylabel("PDF")
+        for _, roi in enumerate(roi_it):
+            raw = self.raw[roi,tidx_min:tidx_max]
+            axes[0].plot(self.t[tidx_min:tidx_max], raw)
+            f, pxx = signal.welch(raw-np.mean(raw), fs=self.f_s)
+            axes[1].plot(f,pxx)
+            f, pxx = signal.periodogram(raw-np.mean(raw), fs=self.f_s)
+            axes[2].plot(f,pxx)
 
-            axes[2].scatter()
         return fig1, axes
-
-
+    
     def _get_time(self, time):
         """Returns t, timeseries_start
 
