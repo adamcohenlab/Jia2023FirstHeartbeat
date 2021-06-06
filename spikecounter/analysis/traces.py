@@ -575,11 +575,11 @@ class TimelapseArrayExperiment():
         """ Plot interspike interval histograms
         """
         roi_it = utils.convert_to_iterable(rois)
+        roi_it = list(roi_it)
         if len(cutoff_times) != len(roi_it):
             raise ValueError("Length of cutoff times array should be same as length of rois")
 
         fig1, axes = visualize.tile_plots_conditions(cutoff_times, figsize)
-
         for idx, roi in enumerate(roi_it):
             if time == "hpf":
                 t = self.peaks_data.loc[roi]["t"]/3600 + self.start_hpf

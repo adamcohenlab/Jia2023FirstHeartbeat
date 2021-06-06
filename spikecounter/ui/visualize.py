@@ -20,7 +20,9 @@ def tile_plots_conditions(condition_list, subplot_size):
     """ Generate subplots for the same graph over a large number of conditions
 
     """
-    n_rows = int(np.sqrt(len(condition_list)))+1
+    n_rows = int(np.ceil(np.sqrt(len(condition_list))))
     fig1, axes = plt.subplots(n_rows, n_rows, figsize=(subplot_size[0]*n_rows, subplot_size[1]*n_rows))
+    if n_rows ==1:
+        axes = np.array([axes])
     axes = axes.ravel()
     return fig1, axes
