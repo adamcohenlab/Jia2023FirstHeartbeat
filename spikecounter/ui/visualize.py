@@ -15,3 +15,12 @@ def display_roi_overlay(img, mask, textcolor="white", alpha=0.5):
 
 def get_line_labels(lns):
     return [l.get_label() for l in lns]
+
+def tile_plots_conditions(condition_list, subplot_size):
+    """ Generate subplots for the same graph over a large number of conditions
+
+    """
+    n_rows = int(np.sqrt(len(condition_list)))+1
+    fig1, axes = plt.subplots(n_rows, n_rows, figsize=(subplot_size[0]*n_rows, subplot_size[1]*n_rows))
+    axes = axes.ravel()
+    return fig1, axes

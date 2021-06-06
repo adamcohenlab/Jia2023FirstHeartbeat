@@ -2,12 +2,14 @@ import pandas as pd
 import numpy as np
 import scipy.signal as signal
 import scipy.interpolate as interpolate
+from scipy import stats
 from scipy import optimize
 import matplotlib.pyplot as plt
 from datetime import datetime
 import os
 from ..ui import visualize
 from .. import utils
+from . import stats as sstats
 plt.style.use(os.path.join(os.path.dirname(__file__), "../report.mplstyle"))
 
 def intensity_to_dff(intensity, percentile_threshold=10, moving_average=False, window=None):
@@ -397,6 +399,7 @@ class TimelapseArrayExperiment():
         
         spike_stats_by_roi = pd.DataFrame(spike_stats_by_roi)
         spike_stats_by_roi = spike_stats_by_roi.reset_index().set_index("roi")
+        del spike_stats_by_roi["index"]
         return spike_stats_by_roi, sta_embryos, ststd_embryos
 
     ### Plotting functions ###
@@ -514,12 +517,87 @@ class TimelapseArrayExperiment():
             axes[2].plot(f,pxx)
 
         return fig1, axes
-    
-    def plot_isi_stats(self, rois, figsize=(12,12)):
-        """ Plot interspike interval histograms and Kolmogorov-Smirnov test
+
+
+    def plot_spike_width_stats(self, rois, figsize=(12,6), time="hpf"):
+        """ Plot spike width against developmental time and interspike interval
         """
-        return None
+        roi_it = utils.convert_to_iterable(rois)
+        
+        fig1, axes = plt.subplots(1, 2, figsize=figsize)
+        axes = axes.ravel()
+
+        for _, roi in enumerate(roi_it):
+            if time == "hpf":
+                t = self.peaks_data.loc[roi]["t"]/3600 + self.start_hpf
+                axes[0].set_xlabel("Developmental Time (hpf)")
+            elif time == "s":
+                t = self.peaks_data.loc[roi]["t"]
+                axes[0].set_xlabel("Time (s)")
+            else:
+                raise ValueError("Time should be hpf or seconds")
+            
+            axes[0].scatter(t, self.peaks_data.loc[roi]["fwhm"])
+            axes[1].scatter(self.peaks_data.loc[roi]["fwhm"], self.peaks_data.loc[roi]["isi"])
+
+        axes[0].set_ylabel("FWHM (s)")
+        axes[1].set_ylabel("ISI (s)")
+        axes[1].set_xlabel("FWHM (s)")          
+        return fig1, axes
     
+    def plot_isi_ks(self, rois, cutoff_times, figsize=(12,12), time="hpf"):
+        """ Plot interspike interval Kolmogorov-Smirnov test
+        """
+        roi_it = utils.convert_to_iterable(rois)
+        fig1, ax1 = plt.subplots(figsize=figsize)
+
+        for _, roi in enumerate(roi_it):
+            if time == "hpf":
+                t = self.peaks_data.loc[roi]["t"]/3600 + self.start_hpf
+                ax1.set_xlabel("Developmental Time (hpf)")
+            elif time == "s":
+                t = self.peaks_data.loc[roi]["t"]
+                ax1.set_xlabel("Time (s)")
+            t_idx, ks_p = sstats.ks_window(self.peaks_data.loc[roi]["isi"], window=50, overlap=0.9)
+            ax1.plot(t[t_idx], ks_p)
+
+
+
+        ax1.axhline(0.05, linestyle="--", color="black", label=r"$p<0.05$")
+        ax1.legend()
+        ax1.set_xlabel("HPF")
+        ax1.set_ylabel(r"Kolmogorov-Smirnov $p$")
+        ax1.set_yscale("log")           
+
+        return fig1, ax1
+
+    def plot_isi_histograms(self, rois, cutoff_times, figsize=(6,6), time="hpf"):
+        """ Plot interspike interval histograms
+        """
+        roi_it = utils.convert_to_iterable(rois)
+        if len(cutoff_times) != len(roi_it):
+            raise ValueError("Length of cutoff times array should be same as length of rois")
+
+        fig1, axes = visualize.tile_plots_conditions(cutoff_times, figsize)
+
+        for idx, roi in enumerate(roi_it):
+            if time == "hpf":
+                t = self.peaks_data.loc[roi]["t"]/3600 + self.start_hpf
+            elif time == "s":
+                t = self.peaks_data.loc[roi]["t"]
+            hist_isi = self.peaks_data.loc[roi]["isi"]
+            hist_isi = hist_isi[t < cutoff_times[idx]]
+            _, bins, _, = axes[idx].hist(hist_isi, bins = np.linspace(0, 40, 20), density=True)
+            axes[idx].set_xlabel("ISI (s)")
+            axes[idx].set_ylabel("PDF")
+
+            P = stats.expon.fit(hist_isi, loc=0)
+            x = np.linspace(0, np.max(bins),100)
+            y = stats.expon.pdf(x, *P)
+            axes[idx].plot(x, y)
+        
+        return fig1, axes
+            
     def _get_time(self, time):
         """Returns t, timeseries_start
 
