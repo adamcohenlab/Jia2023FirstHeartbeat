@@ -5,6 +5,7 @@ import scipy.interpolate as interpolate
 from scipy import stats
 from scipy import optimize
 import matplotlib.pyplot as plt
+from matplotlib import colors
 from datetime import datetime
 import os
 from ..ui import visualize
@@ -595,7 +596,34 @@ class TimelapseArrayExperiment():
             x = np.linspace(0, np.max(bins),100)
             y = stats.expon.pdf(x, *P)
             axes[idx].plot(x, y)
+            axes[idx].set_title("E%d" % roi)
         
+        return fig1, axes
+    
+    def plot_dFF_spectrograms(self, rois, figsize=(8,6), nperseg=1200, noverlap=600, max_plot_freq=1, time="hpf"):
+        """ Plot spectrograms for each embryo
+
+        """
+        roi_it = utils.convert_to_iterable(rois)
+        roi_it = list(roi_it)
+
+        fig1, axes = visualize.tile_plots_conditions(roi_it, figsize)
+        for idx, roi in enumerate(roi_it):
+            f, t_s, Sxx = signal.spectrogram(self.dFF[roi,:]-np.mean(self.dFF[roi,:]), fs=self.f_s, nperseg=nperseg, noverlap=noverlap)
+            if time == "hpf":
+                t = t_s/3600 + self.start_hpf
+                axes[idx].set_xlabel("Developmental Time (hpf)")
+            elif time == "s":
+                t = t_s
+                axes[idx].set_xlabel("Time (s)")
+            else:
+                raise ValueError("Time should be in hpf or seconds")
+
+            img = axes[idx].pcolormesh(t, f[f<max_plot_freq], Sxx[f<max_plot_freq,:],  cmap="magma", norm=colors.LogNorm(vmin=1e-5))
+            cbar = fig1.colorbar(img, aspect=20, shrink=0.7, label=r"$S_{xx}(f)$", ax=axes[idx])
+
+            axes[idx].set_title("E%d" % roi)
+            
         return fig1, axes
             
     def _get_time(self, time):
