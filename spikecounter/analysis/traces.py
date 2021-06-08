@@ -101,14 +101,14 @@ def remove_stim_crosstalk(trace, method="zscore", threshold=2, plot=False, fs=1)
         raise ValueError("Method %s not implemented" % method)
     if plot:
         ts = np.arange(len(trace))/fs
-        fig1, ax1 = plt.subplots(figsize=(10,4))
+        _, ax1 = plt.subplots(figsize=(10,4))
         ax1.plot(ts, trace)
         ax1.plot(ts[mask], trace[mask], "rx")
         
     return crosstalk_removed, mask
 
-def analyze_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, fitting_function=first_trough_exp_fit):
-    """ Generate spike-triggered average from trace and indices of peaks, as well as associated statistics
+def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
+    """ Generate spike-triggered traces of a defined length from a long trace and peak indices
 
     """
     spike_traces = np.ones((len(peak_indices), before+after))*np.nan
@@ -119,6 +119,28 @@ def analyze_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True
         if normalize_height:
             spike_trace /= np.nanmax(spike_trace)
         spike_traces[pk_idx,:] = spike_trace
+    return spike_traces
+
+
+def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True):
+    """ Generate spike-triggered average
+
+    """
+    spike_traces = get_spike_traces(trace, peak_indices, before, after, normalize_height)
+
+    if len(peak_indices) == 0:
+        sta = np.nan*np.ones(before+after)
+    else:
+        sta = np.nanmean(spike_traces, axis=0)
+    return sta
+
+def analyze_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, fitting_function=first_trough_exp_fit):
+    """ Generate spike-triggered average from trace and indices of peaks, as well as associated statistics
+
+    """
+
+    spike_traces = get_spike_traces(trace, peak_indices, before, after, normalize_height)
+
     if len(peak_indices) == 0:
         sta = np.nan*np.ones(before+after)
         ststd = np.nan*np.ones(before+after)
