@@ -1,3 +1,4 @@
+from numpy.core.numeric import cross
 import pandas as pd
 import numpy as np
 import scipy.signal as signal
@@ -87,6 +88,24 @@ def first_trough_exp_fit(st_traces, before, after, f_s=1):
     c_err = np.sqrt(pcov[1,1])
 
     return pd.Series({"alpha":alpha, "c":c, "alpha_err":alpha_err, "c_err":c_err})
+
+def remove_stim_crosstalk(trace, method="zscore", threshold=2, plot=False, fs=1):
+    """ Remove optical crosstalk from e.g. channelrhodopsin stimulation
+
+    """
+    if method == "zscore":
+        zsc = stats.zscore(trace)
+        mask = np.abs(zsc) > threshold
+        crosstalk_removed = trace[~mask]
+    else:
+        raise ValueError("Method %s not implemented" % method)
+    if plot:
+        ts = np.arange(len(trace))/fs
+        fig1, ax1 = plt.subplots(figsize=(10,4))
+        ax1.plot(ts, trace)
+        ax1.plot(ts[mask], trace[mask], "rx")
+        
+    return crosstalk_removed, mask
 
 def analyze_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, fitting_function=first_trough_exp_fit):
     """ Generate spike-triggered average from trace and indices of peaks, as well as associated statistics
