@@ -25,9 +25,34 @@ def plot_image_mean_and_stim(img, mask=None, style="line", duration=0, fs=1):
     fig1, ax1 = plt.subplots(figsize=(12,6))
     ts = np.arange(img.shape[0])/fs
     ax1.plot(ts, trace)
+    bot, top = ax1.get_xlim()
     if style == "line":
-        # TBD
+        ax1.vlines(stim_end/fs, ymin=bot, ymax=top)
+    elif style == "rect":
+        raise ValueError("Rectangle stimulation to be implemented")
+    else:
+        raise ValueError("Style should be line or rect")
     return None
+
+def background_subtract(img, dark_level=100):
+    return img - dark_level
+
+
+def get_image_dFF(img, baseline_percentile=10):
+    """ Convert a raw image into dF/F
+
+    """
+    baseline = np.percentile(img, baseline_percentile, axis=0)
+    dFF = img/baseline
+    return dFF
+
+def filter_and_downsample(img, filter_function, sampling_factor=2):
+    """ filter in time and downsample
+
+    """
+    filtered_img = np.apply_along_axis(filter_function, 0, img)
+    filtered_img = filtered_img[np.arange(filtered_img.shape[0], step=sampling_factor),:,:]
+    return filtered_img
 
 def spike_triggered_average_video(img, offset=1, first_spike_index=0, last_spike_index=0, fs=1, sta_length=300):
     """ Create a spike-triggered average video
