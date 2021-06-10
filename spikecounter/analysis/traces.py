@@ -7,12 +7,45 @@ from scipy import stats
 from scipy import optimize
 import matplotlib.pyplot as plt
 from matplotlib import colors
+from matplotlib import patches
 from datetime import datetime
 import os
 from ..ui import visualize
 from .. import utils
 from . import stats as sstats
 plt.style.use(os.path.join(os.path.dirname(__file__), "../report.mplstyle"))
+
+def find_stim_starts(crosstalk_mask, expected_period, dt=1):
+    """ Find the start of a stimulation period based on cross-excitation from blue channel
+    """
+    mask_edges = crosstalk_mask.astype(int)[1:] - t_mask.astype(int)[:-1]
+    rising_edges = mask_edges == 1
+    ts = dt*np.arange(len(crosstalk_mask))
+    rising_ts = ts[np.argwhere(rising_edges).ravel()+1]
+    
+    curr_stim = rising_ts[0]
+    valid_stims = np.zeros_like(rising_ts)
+    valid_stims[0] = 1
+    for i in range(1, len(rising_ts)):
+        if rising_ts[i] - curr_stim > 0.9*expected_period:
+            valid_stims[i] = 1
+            curr_stim = rising_ts[i]
+    return rising_ts[valid_stims.astype(bool)]
+
+def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4)):
+    """ Plot a trace with rectangles indicating stimulation
+    """
+
+def correct_photobleach(trace, mode="linear"):
+    """ Correct trace for photobleaching
+    """
+    tidx = np.arange(len(trace))
+    if mode == "linear":
+        slope, _, _, _, _ = stats.linregress(tidx, y=trace)
+        corrected_trace = trace - slope*tidx
+    else:
+        raise ValueError("Not implemented")
+    return corrected_trace
 
 def intensity_to_dff(intensity, percentile_threshold=10, moving_average=False, window=None):
     """Calculate DF/F from intensity counts
@@ -89,16 +122,36 @@ def first_trough_exp_fit(st_traces, before, after, f_s=1):
 
     return pd.Series({"alpha":alpha, "c":c, "alpha_err":alpha_err, "c_err":c_err})
 
-def remove_stim_crosstalk(trace, method="zscore", threshold=2, plot=False, fs=1):
+def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot=False, fs=1, mode="remove"):
     """ Remove optical crosstalk from e.g. channelrhodopsin stimulation
 
     """
     if method == "zscore":
         zsc = stats.zscore(trace)
-        mask = np.abs(zsc) > threshold
-        crosstalk_removed = trace[~mask]
+        if side == "both":
+            mask = np.abs(zsc) > threshold
+        elif side == "upper":
+            mask = zsc > threshold
+        elif side == "lower":
+            mask = -zsc > threshold
+        else:
+            raise ValueError("Invalid value for parameter side")
     else:
         raise ValueError("Method %s not implemented" % method)
+    
+    if mode == "remove":
+        crosstalk_removed = trace[~mask]
+    elif mode == "interpolate":
+        xs = np.arange(len(trace))[~mask]
+        ys = trace[~mask]
+        interp_f = interpolate.interp1d(xs, ys, kind="cubic", fill_value="extrapolate")
+        missing_xs = np.argwhere(mask).ravel()
+        missing_ys = interp_f(missing_xs)
+        crosstalk_removed = np.copy(trace)
+        crosstalk_removed[mask] = missing_ys
+    else:
+        raise ValueError("Invalid value for parameter mode")
+    
     if plot:
         ts = np.arange(len(trace))/fs
         _, ax1 = plt.subplots(figsize=(10,4))
