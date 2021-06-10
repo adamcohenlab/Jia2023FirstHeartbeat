@@ -6,5 +6,5 @@
 #SBATCH --mem=20000          # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
-module load matlab/R2018b-fasrc01
-matlab -nojvm -nosplash -nodesktop -nodisplay -r "addpath('/n/cohen_lab/Lab/Computer Code/Image Processing/');batch_vm_to_tiff('$1','$2', 1, 1);"
+module load matlab/R2020b-fasrc01
+matlab -nojvm -nosplash -nodesktop -nodisplay -r "addpath(genpath('/n/cohen_lab/Lab/Computer Code/2020RigControl'));addpath('/n/cohen_lab/Lab/Computer Code/Image Processing/');batch_vm_to_tiff('$1','$2', 1, 1);"
