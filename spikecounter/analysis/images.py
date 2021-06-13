@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.ndimage as ndi
+from scipy import signal
 import matplotlib.pyplot as plt
 from . import traces
 
@@ -63,23 +64,48 @@ def filter_and_downsample(img, filter_function, sampling_factor=2):
     filtered_img = filtered_img[np.arange(filtered_img.shape[0], step=sampling_factor),:,:]
     return filtered_img
 
-def spike_triggered_average_video(img, offset=1, first_spike_index=0, last_spike_index=0, fs=1, sta_length=300):
+def spike_triggered_average_video(img, spike_ends, offset=1, first_spike_index=0, last_spike_index=0, fs=1, sta_length=300):
     """ Create a spike-triggered average video
-
-    Returns:
-    sta - a spike triggered average video of frames defined by sta_length
-    stim_image - the region of stimulus as observed by frame captured during DMD switching
     """
-    mean_img = image_to_trace(img, mask=None)
-    _, spike_mask = traces.remove_stim_crosstalk(mean_img)
-    stim_end = spike_mask_to_stim_index(spike_mask)
-
     spike_triggered_images = []
-    for edge in stim_end[first_spike_index:last_spike_index]:
+    for edge in spike_ends[first_spike_index:last_spike_index]:
         if edge+offset+sta_length > img.shape[0]:
             break
         spike_triggered_images.append(img[edge+offset:edge+offset+sta_length,:,:])
     spike_triggered_images = np.array(spike_triggered_images)
-    sta = np.array(spike_triggered_images)
-    stim_image = np.mean(img[stim_end,:,:], axis=0)
-    return sta, stim_image
+    sta = np.mean(spike_triggered_images, axis=0)
+    return sta
+
+def test_isochron_detection(vid, x, y, savgol_window=25, figsize=(8,3)):
+    """ Check detection of half-maximum in spike_triggered averages
+    """
+    
+    trace = vid[:,y,x]
+    trace_smoothed = signal.savgol_filter(trace, 25, 2)
+    fig1, ax1 = plt.subplots(figsize=figsize)
+    ax1.plot(trace)
+    ax1.plot(trace_smoothed)
+    zeroed = trace_smoothed - trace_smoothed[0]
+    chron = np.argwhere(zeroed > np.max(zeroed)/2).ravel()[0]
+    plt.plot(chron, trace_smoothed[chron], "rx")
+    return fig1, ax1
+
+def generate_isochron_map(vid, savgol_window=25, dt=1):
+    """ Generate image marking isochrons of wave propagation
+    """
+    chron = np.zeros(vid.shape[1:])
+    for i in range(vid.shape[1]):
+        for j in range(vid.shape[2]):
+            trace = vid[:,i, j]
+            trace_smoothed = signal.savgol_filter(trace, 25, 2)
+            zeroed = (trace_smoothed - trace_smoothed[0])
+            normed = zeroed/np.max(zeroed)
+            time_indices = np.argwhere(normed > 0.5).ravel()
+
+            if len(time_indices) == 0:
+                chron[i,j] = vid.shape[0]*dt*1000
+            else:
+                y = time_indices[0]
+                rise_time = (y-1 + (0.5 - normed[y-1])/(normed[y] - normed[y-1]))*dt*1000
+                chron[i,j] = rise_time
+    return chron
