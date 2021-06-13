@@ -29,7 +29,7 @@ def find_stim_starts(crosstalk_mask, expected_period, dt=1):
             curr_stim = rising_ts[i]
     return rising_ts[valid_stims.astype(bool)]
 
-def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4), trace_color="C1", stim_color="blue"):
+def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4), trace_color="C1", stim_color="blue", scale="axis", scalebar_params=None):
     """ Plot a trace with rectangles indicating stimulation
     """
     fig1, ax1 = plt.subplots(figsize=(12,4))
@@ -37,6 +37,19 @@ def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsiz
     for st in stims:
         r = patches.Rectangle((st, start_y), width, height, color=stim_color)
         ax1.add_patch(r)
+    
+    if scale == "axis":
+        pass
+    elif scale == "bar":
+        if scalebar_params is None:
+            raise ValueError("scalebar_params required")
+        ax1.set_axis_off()
+        r1 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"], scalebar_params["time_scale"], scalebar_params["width"], color="black")
+        r2 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"]-scalebar_params["ampl_scale"]+scalebar_params["width"], scalebar_params["width"], scalebar_params["ampl_scale"], color="black")
+        ax1.text(scalebar_params["corner_x"] + offset_x, scalebar_params["corner_y"] + offset_y, "%d s" % scalebar_params["timescale"], size=scalebar_params["fontsize"])
+        ax1.text(scalebar_params["corner_x"] + offset_x, scalebar_params["corner_y"] + offset_y, "%d s" % scalebar_params["ampl_scale"], size=scalebar_params["fontsize"], rotation=90)
+        ax1.add_patch(r1)
+        ax1.add_patch(r2)
     return fig1, ax1
 
 def correct_photobleach(trace, mode="linear"):
