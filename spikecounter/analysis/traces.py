@@ -1,13 +1,10 @@
 from numpy.core.numeric import cross
 import pandas as pd
 import numpy as np
-import scipy.signal as signal
-import scipy.interpolate as interpolate
-from scipy import stats
-from scipy import optimize
+from scipy import stats, optimize, signal, interpolate
+import scipy.ndimage as ndi
 import matplotlib.pyplot as plt
-from matplotlib import colors
-from matplotlib import patches
+from matplotlib import colors, patches
 from datetime import datetime
 import os
 from ..ui import visualize
@@ -32,9 +29,15 @@ def find_stim_starts(crosstalk_mask, expected_period, dt=1):
             curr_stim = rising_ts[i]
     return rising_ts[valid_stims.astype(bool)]
 
-def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4)):
+def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4), trace_color="C1", stim_color="blue"):
     """ Plot a trace with rectangles indicating stimulation
     """
+    fig1, ax1 = plt.subplots(figsize=(12,4))
+    ax1.plot(np.arange(len(trace))*dt, trace, color=trace_color)
+    for st in stims:
+        r = patches.Rectangle((st, start_y), width, height, color=stim_color)
+        ax1.add_patch(r)
+    return fig1, ax1
 
 def correct_photobleach(trace, mode="linear"):
     """ Correct trace for photobleaching
@@ -49,7 +52,6 @@ def correct_photobleach(trace, mode="linear"):
 
 def intensity_to_dff(intensity, percentile_threshold=10, moving_average=False, window=None):
     """Calculate DF/F from intensity counts
-
     """
     if moving_average:
         if window is not None:
@@ -126,6 +128,7 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot
     """ Remove optical crosstalk from e.g. channelrhodopsin stimulation
 
     """
+    # Identify outliers and turn into mask (or directly median filter)
     if method == "zscore":
         zsc = stats.zscore(trace)
         if side == "both":
@@ -136,6 +139,26 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot
             mask = -zsc > threshold
         else:
             raise ValueError("Invalid value for parameter side")
+    elif method == "medfilter":
+        return ndi.median_filter(trace, size=threshold)
+    elif method == "peak_detect":
+        # Use z-score to avoid mean variation
+        zsc = stats.zscore(trace)
+        if side == "both":
+            zsc = np.abs(zsc)
+        elif side == "upper":
+            zsc = zsc
+        elif side == "lower":
+            zsc = - zsc
+        else:
+            raise ValueError("Invalid value for parameter side")
+        peaks, _ = signal.find_peaks(zsc, prominence=threshold)
+        _, _, lips, rips = signal.peak_widths(zsc, peaks, rel_height=0.1)
+        lips = np.floor(lips).astype(int)
+        rips = np.ceil(rips).astype(int)
+        mask = np.zeros_like(trace, dtype=bool)
+        for j in range(len(lips)):
+            mask[lips[j]-1:rips[j]+1] = True
     else:
         raise ValueError("Method %s not implemented" % method)
     
