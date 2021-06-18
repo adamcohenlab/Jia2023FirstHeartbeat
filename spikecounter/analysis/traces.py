@@ -44,10 +44,15 @@ def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsiz
         if scalebar_params is None:
             raise ValueError("scalebar_params required")
         ax1.set_axis_off()
-        r1 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"], scalebar_params["time_scale"], scalebar_params["width"], color="black")
-        r2 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"]-scalebar_params["ampl_scale"]+scalebar_params["width"], scalebar_params["width"], scalebar_params["ampl_scale"], color="black")
-        ax1.text(scalebar_params["corner_x"] + offset_x, scalebar_params["corner_y"] + offset_y, "%d s" % scalebar_params["timescale"], size=scalebar_params["fontsize"])
-        ax1.text(scalebar_params["corner_x"] + offset_x, scalebar_params["corner_y"] + offset_y, "%d s" % scalebar_params["ampl_scale"], size=scalebar_params["fontsize"], rotation=90)
+        xlim = ax1.get_xlim()
+        ylim = ax1.get_ylim()
+        aspect = np.abs(xlim[0] - xlim[1])/np.abs(ylim[0] - ylim[1])
+        r1 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"], scalebar_params["time_scale"], scalebar_params["thickness"], color="black")
+        r2 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"]-scalebar_params["ampl_scale"]+scalebar_params["thickness"], scalebar_params["thickness"]*aspect, scalebar_params["ampl_scale"], color="black")
+        
+        offset = scalebar_params["width"]*0.05
+        ax1.text(scalebar_params["corner_x"] + offset, scalebar_params["corner_y"] + offset, "%d s" % scalebar_params["timescale"], size=scalebar_params["fontsize"])
+        ax1.text(scalebar_params["corner_x"] + offset, scalebar_params["corner_y"] + offset, "%d s" % scalebar_params["ampl_scale"], size=scalebar_params["fontsize"], rotation=90)
         ax1.add_patch(r1)
         ax1.add_patch(r2)
     return fig1, ax1
@@ -137,7 +142,7 @@ def first_trough_exp_fit(st_traces, before, after, f_s=1):
 
     return pd.Series({"alpha":alpha, "c":c, "alpha_err":alpha_err, "c_err":c_err})
 
-def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot=False, fs=1, mode="remove"):
+def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot=False, fs=1, mode="remove", max_width=10):
     """ Remove optical crosstalk from e.g. channelrhodopsin stimulation
 
     """
@@ -165,7 +170,7 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot
             zsc = - zsc
         else:
             raise ValueError("Invalid value for parameter side")
-        peaks, _ = signal.find_peaks(zsc, prominence=threshold)
+        peaks, _ = signal.find_peaks(zsc, prominence=threshold, width=(1,max_width))
         _, _, lips, rips = signal.peak_widths(zsc, peaks, rel_height=0.1)
         lips = np.floor(lips).astype(int)
         rips = np.ceil(rips).astype(int)

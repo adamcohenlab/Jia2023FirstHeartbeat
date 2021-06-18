@@ -168,16 +168,25 @@ def transferjob(sourcedir,targetdir):
     cmd = "sbatch -p transfer -t 0-12:00 --wrap=\"" + wrapcmd + "\""
     os.system(cmd)
 
-def display_zstack(stack, z=0, c="all"):
+def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5,95]):
+    st = stack.copy()
+    if len(stack.shape) < 4:
+        st = st[:,:,:, np.newaxis]
+    min_value = np.percentile(st[~np.isnan(st)], pct_cutoffs[0])
+    max_value = np.percentile(st[~np.isnan(st)], pct_cutoffs[1])
     def view_image(z, c):
+        
         if c=="all":
-            img = stack[z,:,:,:]
+            img = st[z,:,:,:]
         else:
-            img = stack[z,:,:,int(c)]
-        plt.imshow(img, interpolation="nearest")
+            img = st[z,:,:,int(c)]
+        plt.imshow(img, interpolation="nearest", vmin=min_value, vmax=max_value)
+        if len(markers) > 0:
+            for marker in markers:
+                plt.plot(marker[0], marker[1], "rx")
         plt.title("Z: %d C: %s" %(z, str(c)))
         plt.show()
-    interact(view_image, z=(0,stack.shape[0]-1), c=["all"] + list(np.arange(stack.shape[-1])))
+    interact(view_image, z=(0,st.shape[0]-1), c=["all"] + list(np.arange(st.shape[-1])))
 
 def convert_to_iterable(x):
     try:
