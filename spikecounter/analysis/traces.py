@@ -519,16 +519,15 @@ class TimelapseArrayExperiment():
                 mask = (peak_indices >= wi)*(peak_indices < (wi+window))
                 for edge_pair in segment_edges:
                     if edge_pair[1] >= wi and edge_pair[1] < wi+window:
-                        nearest_lower_peak = np.argwhere(peak_indices-edge_pair[1] > 0)[0] - 1
-                        mask[nearest_lower_peak] = False
+                        left_of_segment_edge = np.argwhere(peak_indices-edge_pair[1] < 0).ravel()
+                        if len(left_of_segment_edge) > 0:
+                            last_peak_in_segment = left_of_segment_edge[-1]
+                            mask[last_peak_in_segment] = False
                             # return None
                 if sta_after+sta_before > 0:
                     sta_stats = True
                 else:
                     sta_stats = False
-                
-                
-                # print(wi_idx, np.sum(mask))
 
                 roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(peak_data, mask, f_s=self.f_s, \
                     sta_stats=sta_stats, trace=self.dFF[roi,:], sta_before=sta_before, sta_after=sta_after, min_peaks=isi_stat_min_peaks)
@@ -793,6 +792,8 @@ class TimelapseArrayExperiment():
         rising_edge = np.argwhere(missing_edges==1).ravel()
         falling_edge = np.argwhere(missing_edges==-1).ravel()
         segment_edges = list(zip([0] + list(falling_edge[:len(rising_edge)-1]), list(rising_edge)))
+        if len(rising_edge) == len(falling_edge):
+            segment_edges.append((falling_edge[-1], len(self.missing_data)))
         return segment_edges
 
     def _load_block_metadata(self, data_folder, start_hpf):
