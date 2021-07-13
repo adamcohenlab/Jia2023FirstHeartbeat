@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats, optimize, signal, interpolate
 import scipy.ndimage as ndi
+import skimage.morphology as morph
 import matplotlib.pyplot as plt
 from matplotlib import colors, patches
 from datetime import datetime
@@ -15,7 +16,7 @@ plt.style.use(os.path.join(os.path.dirname(__file__), "../report.mplstyle"))
 def find_stim_starts(crosstalk_mask, expected_period, dt=1):
     """ Find the start of a stimulation period based on cross-excitation from blue channel
     """
-    mask_edges = crosstalk_mask.astype(int)[1:] - t_mask.astype(int)[:-1]
+    mask_edges = crosstalk_mask.astype(int)[1:] - crosstalk_mask.astype(int)[:-1]
     rising_edges = mask_edges == 1
     ts = dt*np.arange(len(crosstalk_mask))
     rising_ts = ts[np.argwhere(rising_edges).ravel()+1]
@@ -57,16 +58,27 @@ def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsiz
         ax1.add_patch(r2)
     return fig1, ax1
 
-def correct_photobleach(trace, mode="linear"):
+def correct_photobleach(trace, method="linear", nsamps=None):
     """ Correct trace for photobleaching
     """
     tidx = np.arange(len(trace))
-    if mode == "linear":
+    if method == "linear":
         slope, _, _, _, _ = stats.linregress(tidx, y=trace)
-        corrected_trace = trace - slope*tidx
+        photobleach = slope*tidx
+        corrected_trace = trace - photobleach
+    elif method == "localmin":
+        """ From Hochbaum 2014 Nat. Methods
+        """
+        if nsamps is None:
+            raise ValueError("nsamps required if mode is localmin")
+        kernel = np.ones(nsamps)
+        photobleach = morph.erosion(trace, kernel)
+        photobleach_padded = np.pad(photobleach, (nsamps-1)//2, mode="mean", stat_length=(nsamps-1)//2)
+        photobleach = signal.convolve(photobleach_padded, kernel/nsamps, mode="valid")
+        corrected_trace = trace/photobleach
     else:
         raise ValueError("Not implemented")
-    return corrected_trace
+    return corrected_trace, photobleach
 
 def intensity_to_dff(intensity, percentile_threshold=10, moving_average=False, window=None):
     """Calculate DF/F from intensity counts
@@ -142,7 +154,7 @@ def first_trough_exp_fit(st_traces, before, after, f_s=1):
 
     return pd.Series({"alpha":alpha, "c":c, "alpha_err":alpha_err, "c_err":c_err})
 
-def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot=False, fs=1, mode="remove", max_width=10):
+def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot=False, fs=1, mode="remove", max_width=10, lpad=0, rpad=0):
     """ Remove optical crosstalk from e.g. channelrhodopsin stimulation
 
     """
@@ -172,8 +184,8 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot
             raise ValueError("Invalid value for parameter side")
         peaks, _ = signal.find_peaks(zsc, prominence=threshold, width=(1,max_width))
         _, _, lips, rips = signal.peak_widths(zsc, peaks, rel_height=0.1)
-        lips = np.floor(lips).astype(int)
-        rips = np.ceil(rips).astype(int)
+        lips = np.floor(lips).astype(int)-lpad
+        rips = np.ceil(rips).astype(int)+rpad
         mask = np.zeros_like(trace, dtype=bool)
         for j in range(len(lips)):
             mask[lips[j]-1:rips[j]+1] = True
@@ -488,7 +500,7 @@ class TimelapseArrayExperiment():
 
     def get_windowed_peak_stats(self, window, prominence="auto", overlap=0.5, isi_stat_min_peaks=7, sta_before=0, sta_after=0, wlen=400):
         if not self.peaks_found:
-            raise Exception("Peaks not found")
+            raise Exception("Run analyze_peaks first")
 
         sta_embryos = {}
         ststd_embryos = {}

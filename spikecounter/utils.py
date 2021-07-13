@@ -4,6 +4,18 @@ from skimage import transform
 from datetime import datetime
 import matplotlib.pyplot as plt
 from ipywidgets import interact
+from scipy import interpolate
+
+def shiftkern(kernel, a, b, c, dt):
+    """ From Hochbaum and Cohen 2012
+    """
+    k = a*kernel + b
+    t0 = np.argmax(kernel)
+    L = len(kernel)
+    x1 = np.arange(L) - t0
+    x2 = (x1 - dt)*c
+    interpf = interpolate.interp1d(x1, k, fill_value=np.percentile(k, 10), bounds_error=False)
+    return interpf(x2)
 
 def extract_experiment_name(input_path):
     folder_names = input_path.split("/")
