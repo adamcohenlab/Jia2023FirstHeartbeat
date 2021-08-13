@@ -1,0 +1,25 @@
+import os
+import argparse
+from parse import *
+
+parser = argparse.ArgumentParser()
+parser.add_argument("rootdir", type=str)
+parser.add_argument("startidx", type=int)
+parser.add_argument("endidx", type=int)
+
+args = parser.parse_args()
+
+
+found_indices = set([])
+
+for f in os.listdir(args.rootdir):
+    if ".tif" in f or ".csv" in f:
+        res = parse("t{:d}_", f)
+        found_indices.add(res[0])
+
+missing_indices = []
+for idx in np.arange(startidx, endidx+1):
+    if idx not in found_indices:
+        missing_indices.append(idx)
+print(missing_indices)
+print(len(missing_indices))
