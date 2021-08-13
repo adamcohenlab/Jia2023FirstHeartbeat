@@ -15,7 +15,8 @@ found_indices = set([])
 for f in os.listdir(args.rootdir):
     if ".tif" in f or ".csv" in f:
         res = parse("t{:d}_", f)
-        found_indices.add(res[0])
+        if res is not None:
+            found_indices.add(res[0])
 
 missing_indices = []
 for idx in range(args.startidx, args.endidx+1):
