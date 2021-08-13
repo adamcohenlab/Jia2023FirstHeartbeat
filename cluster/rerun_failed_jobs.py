@@ -22,13 +22,19 @@ for p in os.listdir("~"):
                 res = parse("myerrors_{:d}.err", p)
                 failed_jobs.append(res[0])
 print(failed_jobs)
+failed_job_lines = []
 with open(filepath, "r") as jobs_file:
     while True:
         l = jobs_file.readline()
-        if not l:
-            break
-        cmd = jobs_file.readline()
-        if str(failed_jobs[0]) in l:
-            subprocess.run(json.loads(cmd))
-            print(cmd)
-            failed_jobs = failed_jobs[1:]
+        line_counter = 0
+        line_counter2 = 0
+        if "Submitted" in l:
+            if str(failed_jobs[0]) in l:
+                failed_job_lines.append(line_counter)
+            line_counter += 1
+        else:
+            if line_counter2 == failed_job_lines[0]:
+                print(l)
+                subprocess.run(json.loads(l))
+                failed_job_lines = failed_job_lines[1:]
+            line_counter2 +=1
