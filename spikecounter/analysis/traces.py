@@ -105,7 +105,7 @@ def standard_lp_filter(raw, norm_thresh=0.5):
     # intensity = signal.filtfilt(b, a, intensity)
     return intensity
 
-def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1):
+def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_prom_scale=0.5, auto_thresh_scale=0.5):
     """ Analyze peaks within a given trace and return the following statistics, organized in a pandas DataFrame:
 
     peak_idx: index where each peak is
@@ -114,17 +114,21 @@ def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1):
 
     """
     if prominence == "auto":
-        p = np.percentile(trace, 95)/2
+        p = np.percentile(trace, 95)*auto_prom_scale
     else:
         p = prominence
-
+    if threshold == "auto":
+        t = np.percentile(trace,95)*auto_thresh_scale
+    else:
+        t = threshold
+    
     peaks, properties = signal.find_peaks(trace, prominence=p, height=0, wlen=wlen)
-    peaks = peaks[trace[peaks]>threshold]
+    prominences = np.array(properties["prominences"])
+    prominences = prominences[trace[peaks]>t]
+    peaks = peaks[trace[peaks]>t]
     fwhm = signal.peak_widths(trace, peaks, rel_height=0.5)[0]/f_s
     isi = (peaks[1:] - peaks[:-1])/f_s
     isi = np.append(isi, np.nan)
-    prominences = np.array(properties["prominences"])
-    prominences = prominences[trace[peaks]>threshold]
     res = pd.DataFrame({"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi})
     return res
 
@@ -366,7 +370,7 @@ class TimelapseArrayExperiment():
         return fig1, ax1
 
     def load_traces(self, filter_function=standard_lp_filter, timepoints=None, per_trace_start=0, background_subtract=False, \
-        scale_lowest_mean=False, end_index=0, custom_timepoints=[], custom_preprocessing_functions = [], ma_window=400):
+        scale_lowest_mean=False, end_index=0, custom_timepoints=[], custom_preprocessing_functions = [], pb_window=401):
         """ Load and merge traces from individual data CSVs containing time blocks for arrays of embryos.
         """
         if timepoints is None:
@@ -422,6 +426,7 @@ class TimelapseArrayExperiment():
                 elif isinstance(background_subtract, int):
                     roi_trace -= np.mean(background.loc[roi]["mean_intensity"])
                 
+                roi_trace, _ = correct_photobleach(roi_trace, method="localmin", nsamps=pb_window)
                 raw_data_timepoint[i,:] = roi_trace
             
             # Load blocks
@@ -488,12 +493,13 @@ class TimelapseArrayExperiment():
         idx = np.argwhere(timepoint > time_array).ravel()[0]
         return self.block_metadata["file_name"].iloc[idx]
 
-    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0):
+    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5):
         dfs = []
         for roi in range(self.n_rois):
-            df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold, f_s=self.f_s)
+            df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold, f_s=self.f_s, auto_prom_scale=auto_prom_scale, auto_thresh_scale=auto_thresh_scale)
             df["t"] = self.t[df["peak_idx"]]
             df["roi"] = roi
+            df["hpf"] = df["t"]/3600 + self.start_hpf
             dfs.append(df)
         self.peaks_data = pd.concat(dfs, axis=0).set_index("roi")
         self.peaks_found = True
@@ -534,6 +540,7 @@ class TimelapseArrayExperiment():
                 
 
                 roi_spike_stats["offset"] = self.t[wi]
+                roi_spike_stats["hpf"] = roi_spike_stats["offset"]/3600 + self.start_hpf
                 roi_spike_stats["roi"] = roi
                 roi_spike_stats["mean_freq"] = roi_spike_stats["n_peaks"]/(window - np.sum(self.missing_data[wi:wi+window]))*self.f_s
 
