@@ -292,11 +292,13 @@ def analyze_wave_prop(masked_image, mask, nbins=16):
     kernel_size=3
     kernel = np.ones((kernel_size,kernel_size))/kernel_size**2
     filtered = ndi.gaussian_filter(masked_image, [0,2,2])
+    
     isochron = generate_isochron_map(filtered, savgol_window=5, dt=1/10.2)
     isochron_smoothed = ndi.convolve(isochron,kernel)
     isochron_smoothed[~mask] = np.nan
     gradient_y, gradient_x = np.gradient(isochron_smoothed)
     magnitude = np.sqrt(gradient_x**2 + gradient_y**2)
+    
     angle = np.arctan2(gradient_y, gradient_x)
     mag_masked = magnitude[mask]
     angle_masked = angle[mask]
