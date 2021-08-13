@@ -18,7 +18,7 @@ for f in os.listdir(args.rootdir):
         found_indices.add(res[0])
 
 missing_indices = []
-for idx in np.arange(startidx, endidx+1):
+for idx in range(args.startidx, args.endidx+1):
     if idx not in found_indices:
         missing_indices.append(idx)
 print(missing_indices)
