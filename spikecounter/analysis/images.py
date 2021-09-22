@@ -46,9 +46,10 @@ def get_all_region_data(img, mask):
     region_pixels = []
     regions = np.unique(mask)
     regions = regions[regions >= 1]
+    region_data = []
     
     for region in regions:
-        rd, gc = images.get_region_data(img, mask, region)
+        rd, gc = get_region_data(img, mask, region)
         region_pixels.append(gc)
         region_data.append(rd)
     return region_data, region_pixels
@@ -182,7 +183,7 @@ def get_spike_kernel(img, kernel_length, nbefore, peak_prominence, savgol_length
     kernel[kernel_length:] = kernel[kernel_length-1]
     return kernel, kernel_hits
 
-def snapt(img, kernel):
+def snapt(img, kernel, offset_width=0):
     """ Run SNAPT fitting algorithm (Hochbaum et al. Nature Methods 2014)
     """
     height = img.shape[1]
@@ -190,10 +191,16 @@ def snapt(img, kernel):
     beta = np.zeros((height, width, 4))
     error_det = np.zeros((height, width))
     failed_counter = 0
+    t0 = np.argmax(kernel)
+    L = len(kernel)
+    minshift = - t0
+    maxshift = (L - t0)
+    
     for i in range(height):
         for j in range(width):
             try:
-                popt, pcov = optimize.curve_fit(utils.shiftkern, kernel, img[:,i,j], p0=[0.05,1,1,0], absolute_sigma=True)
+                popt, pcov = optimize.curve_fit(utils.shiftkern, kernel, img[:,i,j], p0=[1,1,1,np.random.randint(-offset_width,offset_width+1)], absolute_sigma=True, \
+                                                bounds=([0,-np.inf,0,minshift],[np.inf,np.inf,np.inf,maxshift]))
                 beta[i,j,:] = popt
                 error_det[i,j] = np.linalg.det(pcov)
             except Exception as e:
@@ -266,34 +273,29 @@ def test_isochron_detection(vid, x, y, savgol_window=25, figsize=(8,3)):
     plt.plot(chron, trace_smoothed[chron], "rx")
     return fig1, ax1
 
-def generate_isochron_map(vid, savgol_window=25, dt=1):
+def generate_isochron_map(vid, savgol_window=25, dt=1, prefilter=True):
     """ Generate image marking isochrons of wave propagation
     """
     chron = np.zeros(vid.shape[1:])
-    for i in range(vid.shape[1]):
-        for j in range(vid.shape[2]):
-            trace = vid[:,i, j]
-            trace_smoothed = signal.savgol_filter(trace, savgol_window, 2)
-            zeroed = (trace_smoothed - trace_smoothed[0])
-            normed = zeroed/np.max(zeroed)
-            time_indices = np.argwhere(normed > 0.5).ravel()
-
-            if len(time_indices) == 0:
-                chron[i,j] = vid.shape[0]*dt*1000
-            else:
-                y = time_indices[0]
-                rise_time = (y-1 + (0.5 - normed[y-1])/(normed[y] - normed[y-1]))*dt*1000
-                chron[i,j] = rise_time
+    if prefilter:
+        smoothed_vid = np.apply_along_axis(lambda x: signal.savgol_filter(x, savgol_window, 2), 0, vid)
+    else:
+        smoothed_vid = vid
+        
+    zeroed = smoothed_vid - smoothed_vid[0,:,:]
+    normed = zeroed/zeroed.max(axis=0)
+    hm_indices = np.apply_along_axis(find_half_max, 0, normed)
+    chron = hm_indices*dt*1000
     return chron
 
-def analyze_wave_prop(masked_image, mask, nbins=16):
+def analyze_wave_prop(masked_image, mask, nbins=16, savgol_window=5, dt=1):
     """ Measure wave speed, direction of data
     """
     kernel_size=3
     kernel = np.ones((kernel_size,kernel_size))/kernel_size**2
     filtered = ndi.gaussian_filter(masked_image, [0,2,2])
     
-    isochron = generate_isochron_map(filtered, savgol_window=5, dt=1/10.2)
+    isochron = generate_isochron_map(filtered, savgol_window=5, dt=dt)
     isochron_smoothed = ndi.convolve(isochron,kernel)
     isochron_smoothed[~mask] = np.nan
     gradient_y, gradient_x = np.gradient(isochron_smoothed)

@@ -269,10 +269,20 @@ def masked_peak_statistics(df, mask, f_s=1, min_peaks=6, sta_stats=False, trace=
         raise Exception("Mask must be same length as number of peaks")
     
     masked_df = df.loc[mask]
-
+    
     mean_prom = np.mean(masked_df["prominence"])
     std_prom = np.std(masked_df["prominence"])
     mean_width = np.mean(masked_df["fwhm"])
+    try:
+        pct95_dff = np.percentile(masked_df["prominence"], 95)
+        pct5_dff = np.percentile(masked_df["prominence"], 5)
+        max_dff = np.max(masked_df["prominence"])
+        min_dff = np.min(masked_df["prominence"])
+    except Exception:
+        pct95_dff = np.nan
+        pct5_dff = np.nan
+        max_dff = np.nan
+        min_dff = np.nan
     
     locs = np.array(masked_df["peak_idx"])
     n_peaks = len(locs)
@@ -286,7 +296,9 @@ def masked_peak_statistics(df, mask, f_s=1, min_peaks=6, sta_stats=False, trace=
         std_width = np.std(masked_df["fwhm"])
 
     peak_stats = pd.Series({"mean_isi": mean_isi, "std_isi": std_isi, "mean_prom": mean_prom, \
-        "std_prom": std_prom, "mean_width": mean_width, "std_width": std_width, "n_peaks": n_peaks})
+        "std_prom": std_prom, "mean_width": mean_width, "std_width": std_width, "n_peaks": n_peaks, \
+                           "pct95_dff": pct95_dff, "pct5_dff": pct5_dff, "max_dff": max_dff, \
+                            "min_dff": min_dff})
     
     if sta_stats:
         if trace is None or sta_before is None or sta_after is None:
@@ -453,7 +465,7 @@ class TimelapseArrayExperiment():
 
         data_blocks = np.concatenate(data_blocks, axis=1)
         dFF_blocks = np.concatenate(dFF_blocks, axis=1)
-
+        
         # Interpolate to merge all the individual blocks, and mark gaps in the data
         t = np.array(t)
         t_interp = np.arange(np.min(t), np.max(t), step=1/self.f_s)
@@ -485,12 +497,12 @@ class TimelapseArrayExperiment():
 
         """
         if time == "hpf":
-            time_array = self.block_metadata["hpf"]
+            time_array = self.block_metadata["hpf"].to_numpy()
         elif time == "s":
-            time_array = self.block_metadata["offset"]
+            time_array = self.block_metadata["offset"].to_numpy()
         else:
             raise Exception("hpf or s time required")
-        idx = np.argwhere(timepoint > time_array).ravel()[0]
+        idx = np.argwhere(timepoint < time_array).ravel()[0] - 1
         return self.block_metadata["file_name"].iloc[idx]
 
     def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5):

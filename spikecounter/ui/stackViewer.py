@@ -3,20 +3,23 @@ from matplotlib import lines
 import numpy as np
 from skimage import filters, exposure
 import scipy.ndimage as ndimage
+import threading
 from frozendict import frozendict
 from matplotlib.path import Path
 from matplotlib.colors import Normalize
+from .. import utils
 
 class ZStackViewer():
     def __init__(self, img, width=6, height=6):
         self.width = width
         self.height = height
-        self.img = img
+        self.img = utils.standardize_n_dims(img)
         self.index = 0
         self._remove_keymap_conflicts({'j', 'k'})
         self.artists = []
         self.lines = []
         self.points = {}
+        self.interact_complete = threading.Event()
         pass
 
     def view_stack(self):
@@ -268,8 +271,10 @@ class HyperStackViewer(ZStackViewer):
         self.cidkey = fig.canvas.mpl_connect('key_press_event', self._process_key_points)
         x_max = ax.get_xlim()[1]
         y_max = ax.get_ylim()[0]
-        plt.show()
+        plt.show(block=True)
+#         self.interact_complete.wait()
         if len(self.points) <= 2:
+            print("This happened")
             return None
         xs, ys =  zip(*self.points)
         points = np.array([xs, ys]).T
@@ -400,9 +405,13 @@ class HyperStackViewer(ZStackViewer):
                     print("Region closed")
                     self._disconnect()
                     plt.close()
+#                     self.interact_complete.set()
             elif len(self.points) == self._target_n_points:
                 self._disconnect()
-                plt.close()                
+                plt.close()
+#                 self.interact_complete.set()
+            
+            
 
     def _distance(self, p1, p2):
         return np.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
