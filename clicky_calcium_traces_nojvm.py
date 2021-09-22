@@ -92,7 +92,9 @@ for file_path in files:
             map_path = os.path.join(args.path_to_regions, filename + "_ROIs.tif")
         else:
             map_path = args.path_to_regions
+        print(map_path)
         mask_map = imread(map_path)
+        print(np.unique(mask_map))
         for i in range(1,np.max(mask_map)+1):
             mask = mask_map == i
             mask = np.tile(mask, (img.shape[0], img.shape[1], img.shape[2], 1, 1))
