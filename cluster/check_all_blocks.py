@@ -13,8 +13,8 @@ args = parser.parse_args()
 found_indices = set([])
 
 for f in os.listdir(args.rootdir):
-    if ".tif" in f or ".csv" in f:
-        res = parse("t{:d}_", f)
+    if ".tif" in f or ".csv" in f: 
+        res = search("t{:d}_", f)
         if res is not None:
             found_indices.add(res[0])
 
