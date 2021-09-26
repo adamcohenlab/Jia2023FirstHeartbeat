@@ -1,12 +1,13 @@
 from skimage.color import rgb2gray
-from skimage import img_as_ubyte
-import skimage.filters as filters
+from skimage import img_as_ubyte, filters, measure
 import skimage.morphology as morph
 import scipy.stats as stats
 import scipy.signal as signal
 import scipy.ndimage as ndimage
+from scipy.fft import fft, fftfreq
 import numpy as np
 from .. import utils
+from ..analysis import images
 
 def despeckle(img, channels=[0], filter_size=3):
     flatdisk = morph.disk(filter_size)
@@ -124,3 +125,85 @@ def generate_cropped_region_image(global_coords, intensity):
         px = global_coords_rezeroed[idx,:]
         img[px[0], px[1]] = intensity[idx]
     return img
+
+
+def segment_hearts(img, expected_embryos, prev_coms=None, prev_mask_labels=None, fill_missing=True):
+    """ Segment hearts using the following approach:
+    1. Identify temporally variable regions of image using coefficient of variation and 
+    coarsen using morphological operations. This will roughly identify all calcium activity
+    in the FOV.
+    2. Perform PCA on each region identified in #1 separately. Take the dot product of the
+    first principal component with the intensity-normalized raw data.
+    3. Take the Fourier transform of the resulting trace and measure the fraction
+    of the total power within the expected frequency band for the heartbeat. If this is above a
+    certain threshold (.4 seems to work well), keep the region. Otherwise toss it.
+    """
+    mean_img = img.mean(axis=0)
+    std_img = np.std(img, axis=0)
+    cv_img = std_img/mean_img
+    cv_mask = cv_img > np.percentile(cv_img,85)
+    
+    xx = morph.binary_opening(cv_mask, selem= np.ones((5,5)))
+    xxx = morph.binary_dilation(xx, selem= np.ones((15,15)))
+    labelled = measure.label(xxx)
+    rd, gc = images.get_all_region_data(img, labelled)
+    
+    bp_counter = 0
+    new_mask = np.zeros_like(mean_img, dtype=bool)
+    for i, regiondata in enumerate(rd):
+        pca = PCA(n_components=5)
+        rd_norm = regiondata-np.mean(regiondata, axis=0)
+        rd_norm = rd_norm/np.max(np.abs(rd_norm), axis=0)
+        pca.fit(rd_norm)
+        c = pca.components_[0]
+        trace = np.matmul(rd_norm, c)
+        N = len(trace)
+        yf = fft(trace)
+        xf = fftfreq(len(trace), 0.102)[:N//2]
+        abs_power = np.abs(yf[0:N//2])
+        norm_abs_power = abs_power/np.sum(abs_power)
+        band_power = np.sum(norm_abs_power[(xf>0.1) & (xf<1)])
+        if band_power > 0.38:
+            bp_counter+=1
+            comp_abs = np.abs(c)
+            correct_indices = comp_abs > filters.threshold_otsu(comp_abs)
+            mask_coords = gc[i][correct_indices]
+            new_mask[tuple(zip(*mask_coords.tolist()))] = 1
+    new_mask = morph.binary_opening(new_mask, selem=np.ones((5,5)))
+    new_mask = morph.binary_dilation(new_mask, selem=np.ones((5,5)))
+    
+    new_mask_labels = measure.label(new_mask)
+
+    coms = ndimage.center_of_mass(new_mask, labels=new_mask_labels, index=np.arange(1,bp_counter+1))
+    coms = np.array(coms)
+    print(len(coms))
+    if len(coms) > expected_embryos:
+        plt.imshow(new_mask_labels)
+        raise Exception("Extra segments found")
+    if prev_coms is not None:
+        new_coms_ordered = np.zeros((max(coms.shape[0], prev_coms.shape[0]), 2))
+        n_new_rois = 0
+        new_mask_copy = np.zeros_like(new_mask_labels, dtype=np.uint8)
+        for idx in range(coms.shape[0]):
+            com = coms[idx,:]
+            dist = np.sum(np.power(com - prev_coms,2), axis=1)
+            min_idx = np.argmin(dist)
+            if np.sqrt(dist[min_idx]) < 10:
+                new_mask_copy[new_mask_labels==(idx+1)] = min_idx+1
+                new_coms_ordered[min_idx,:] = com
+            elif len(prev_coms) + n_new_rois < expected_embryos:
+                n_new_rois += 1
+                new_label_val = len(prev_coms) + n_new_rois
+                new_mask_copy[new_mask_labels==(idx+1)] = new_label_val
+                new_coms_ordered[new_label_val-1,:] = com
+        if len(coms) < len(prev_coms) and fill_missing:
+            new_labels = set(np.unique(new_mask_copy).tolist())
+            old_labels = np.unique(prev_mask_labels).tolist()
+            for ol in old_labels:
+                if ol not in new_labels:
+                    print(ol)
+                    new_mask_copy[prev_mask_labels==ol] = ol
+                    new_coms_ordered[ol-1,:] = prev_coms[ol-1,:]
+        new_mask_labels = new_mask_copy
+        coms = new_coms_ordered
+    return new_mask_labels, coms
