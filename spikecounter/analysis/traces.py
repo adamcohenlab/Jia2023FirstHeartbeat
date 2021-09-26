@@ -231,6 +231,17 @@ def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
         spike_traces[pk_idx,:] = spike_trace
     return spike_traces
 
+def align_fixed_offset(traces, offsets):
+    """ Align a list of traces according to known relative offsets
+
+    """
+    max_offset = np.max(offsets)
+    aligned_traces = np.nan*np.ones((traces.shape[0], traces.shape[1]+max_offset))
+    for i in range(traces.shape[0]):
+        start_idx =  max_offset-offsets[i]
+        aligned_traces[start_idx:start_idx + traces.shape[1]] = traces[i,:]
+    return aligned_traces
+
 
 def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True):
     """ Generate spike-triggered average
