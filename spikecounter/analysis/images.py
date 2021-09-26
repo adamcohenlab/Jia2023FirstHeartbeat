@@ -2,8 +2,10 @@ import numpy as np
 import scipy.ndimage as ndi
 from scipy import signal, stats, interpolate, optimize
 import matplotlib.pyplot as plt
+from skimage import transform, filters, morphology
 from . import traces
 from .. import utils
+from ..ui import visualize
 from sklearn.decomposition import PCA
 
 def refine_segmentation_pca(img, mask, n_components=10, threshold_percentile=70):
@@ -196,21 +198,95 @@ def snapt(img, kernel, offset_width=0):
     minshift = - t0
     maxshift = (L - t0)
     
-    for i in range(height):
-        for j in range(width):
-            try:
-                popt, pcov = optimize.curve_fit(utils.shiftkern, kernel, img[:,i,j], p0=[1,1,1,np.random.randint(-offset_width,offset_width+1)], absolute_sigma=True, \
-                                                bounds=([0,-np.inf,0,minshift],[np.inf,np.inf,np.inf,maxshift]))
-                beta[i,j,:] = popt
-                error_det[i,j] = np.linalg.det(pcov)
-            except Exception as e:
-                print("(%d, %d) %s" % (i,j, str(e)))
-                beta[i,j,:] = np.nan*np.ones(4)
-                error_det[i,j] = np.nan
-                failed_counter += 1
+    beta = np.apply_along_axis(lambda tr: kernel_fit_single_trace(tr, kernel, minshift, maxshift, offset_width), \
+                               0, img)
+    error_det = beta[4,:,:]
+    beta = beta[:4,:,:]
+    failed_pixels = np.sum(np.isnan(error_det))
     print("%d/%d pixels failed to fit (%.2f %%)" % (failed_counter, height*width, failed_counter/(height*width)*100))
+    
+    
+#     for i in range(height):
+#         for j in range(width):
+#             try:
+#                 popt, pcov = optimize.curve_fit(utils.shiftkern, kernel, img[:,i,j], p0=[1,1,1,np.random.randint(-offset_width,offset_width+1)], absolute_sigma=True, \
+#                                                 bounds=([0,-np.inf,0,minshift],[np.inf,np.inf,np.inf,maxshift]))
+#                 beta[i,j,:] = popt
+#                 error_det[i,j] = np.linalg.det(pcov)
+#             except Exception as e:
+#                 print("(%d, %d) %s" % (i,j, str(e)))
+#                 beta[i,j,:] = np.nan*np.ones(4)
+#                 error_det[i,j] = np.nan
+#                 failed_counter += 1
+#     print("%d/%d pixels failed to fit (%.2f %%)" % (failed_counter, height*width, failed_counter/(height*width)*100))
     return beta, error_det
 
+def kernel_fit_single_trace(trace, kernel, minshift, maxshift, offset_width):
+    """ Nonlinear fit of empirical kernel to a single timeseries
+    """
+    try:
+        popt, pcov = optimize.curve_fit(utils.shiftkern, kernel, trace,\
+                                        p0=[1,1,1,np.random.randint(-offset_width,offset_width+1)], absolute_sigma=True, \
+                                        bounds=([0,-np.inf,0,minshift],[np.inf,np.inf,np.inf,maxshift]))
+        beta = popt
+        error_det = np.linalg.det(pcov)
+    except Exception as e:
+        print("(%d, %d) %s" % (i,j, str(e)))
+        beta = np.nan*np.ones(4)
+        error_det = np.nan
+    beta = np.append(beta, error_det)
+    return beta
+
+def spline_timing(img, s=0.1, n_knots=4):
+    knots = np.linspace(0, img.shape[0]-1, num=n_knots)[1:-1]
+    beta = np.apply_along_axis(lambda tr: spline_fit_single_trace(tr, s, knots), 0, img)
+    return beta
+
+def spline_fit_single_trace(trace, s, knots):
+    """ Least squares spline fitting of a single timeseries
+    """
+    x = np.arange(len(trace))
+    (t,c,k), res,_,_ = interpolate.splrep(x,trace, s=s, task=-1,t=knots, full_output=True,k=3)
+    spl = interpolate.BSpline(t,c,k)
+    
+    dspl = spl.derivative()
+    d2spl = spl.derivative(nu=2)
+    extrema = optimize.fsolve(dspl, knots[0])
+    extrema_values = spl(extrema)
+    if np.all(np.logical_or(extrema < 0, extrema > len(trace))):
+        beta = np.nan*np.ones(4)
+        return beta
+    global_max_index = np.argmax(extrema_values)
+    global_max = extrema[global_max_index]
+    global_max_val = extrema_values[global_max_index]
+    
+    d2 = d2spl(extrema)
+    minima_indices = np.argwhere(d2 > 0).ravel()
+    if len(minima_indices) == 0:
+        last_min_before_max = 0
+    else:
+        minima = extrema[minima_indices]
+        premax_minima_indices = np.argwhere(minima < global_max).ravel()
+        if len(premax_minima_indices) == 0:
+            last_min_before_max = 0
+        else:
+            last_min_before_max = minima[premax_minima[-1]]
+    min_val = spl(last_min_before_max)
+    halfmax_magnitude = (global_max_val - min_val)/2 + min_val
+    try:
+        halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
+                                       bounds=[last_min_before_max, global_max]).x
+    except Exception as e:
+        print(extrema)
+        print(d2)
+        print(last_min_before_max)
+        print(global_max)
+        raise e
+    beta = np.array([global_max, halfmax, global_max_val/min_val,res])
+    
+    return beta
+    
+    
 def correct_photobleach(img, mask=None, method="localmin", nsamps=51):
     """ Perform photobleach correction on each pixel in an image
     """
@@ -320,4 +396,36 @@ def analyze_wave_prop(masked_image, mask, nbins=16, savgol_window=5, dt=1):
 
 def fill_nans_with_neighbors(img):
     isnan = np.isnan(img)
+    
+def image_to_sta(raw_img, downsample_factor=1, mask=None, plot=False):
+    """ Convert raw image into spike triggered average
+    """
+    if plot:
+        fig1, axes = plt.subplots(2,2, figsize=(10,10))
+        axes = axes.ravel()
+        
+    if downsample_factor == 1:
+        di = raw_img
+    else:
+        sos = signal.butter(4, 1/downsample_factor, output='sos')
+        filtered = np.apply_over_axes(lambda x: signal.sosfiltfilt(sos, x), raw_img, [1,2])
+        di = transform.downscale_local_mean(filtered, (1,factor,factor))
+    
+    mean_img = di.mean(axis=0)
+    if mask is None:
+        mask = mean_img > np.percentile(mean_img, 80)
+        kernel_size = int(mask.shape[0]/8)
+        mask = morphology.binary_closing(mask, selem=np.ones(kernel_size, kernel_size))
+    _,_ = visualize.display_roi_overlay(mean_img, mask, ax=axes[0])
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    return 0
+    
     
