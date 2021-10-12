@@ -9,6 +9,7 @@ from . import traces
 from .. import utils
 from ..ui import visualize
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 import os
 
 def refine_segmentation_pca(img, mask, n_components=10, threshold_percentile=70):
@@ -88,6 +89,20 @@ def generate_cropped_region_image(intensity, global_coords):
             px = global_coords_rezeroed[idx,:]
             img[:,px[0], px[1]] = intensity[:, idx]
     return img
+
+def display_pca_data(pca, raw_data, gc, n_components=5):
+    """ Show spatial principal components of a video and the corresponding temporal trace (dot product).
+    """
+    for i in range(n_components):
+        fig1, axes = plt.subplots(1, 2, figsize=(12,6))
+        axes = axes.ravel()
+        comp = pca.components_[i]
+        cropped_region_image = generate_cropped_region_image(comp, gc)
+        tr = np.matmul(raw_data, comp)
+        axes[0].imshow(cropped_region_image)
+        axes[0].set_title("PC %d (Fraction Var: %.3f)" %(i+1, pca.explained_variance_ratio_[i]))
+        axes[1].set_title("PC Value")
+        axes[1].plot(tr)
 
 def spike_mask_to_stim_index(spike_mask):
     """ Convert detected spikes from crosstalk into a end of stimulation index for spike-triggered averaging
@@ -244,17 +259,31 @@ def spline_timing(img, s=0.1, n_knots=4):
     beta = np.apply_along_axis(lambda tr: spline_fit_single_trace(tr, s, knots), 0, img)
     return beta
 
-def spline_fit_single_trace(trace, s, knots):
+def spline_fit_single_trace(trace, s, knots, plot=False):
     """ Least squares spline fitting of a single timeseries
     """
     x = np.arange(len(trace))
     (t,c,k), res,_,_ = interpolate.splrep(x,trace, s=s, task=-1,t=knots, full_output=True,k=3)
     spl = interpolate.BSpline(t,c,k)
+    spl_values = spl(x)
+    
+    if plot:
+        fig1, ax1 = plt.subplots(figsize=(12,4))
+        ax1.plot(trace)
+        ax1.plot(spl(x))
     
     dspl = spl.derivative()
     d2spl = spl.derivative(nu=2)
-    extrema = optimize.fsolve(dspl, knots[0])
+#     naive_max = np.argmax(spl_values)
+#     naive_min = np.argmin(spl_values[:naive_max])
+#     e1 = optimize.fsolve(dspl, naive_max-5)
+#     e2 = optimize.fsolve(dspl, naive_min+5)
+    extrema = np.argwhere(np.diff(np.sign(dspl(x)))).ravel()
+#     extrema = np.array([naive_min, naive_max])
+            
     extrema_values = spl(extrema)
+    if plot:
+        ax1.plot(extrema, extrema_values, "ko")
     if np.all(np.logical_or(extrema < 0, extrema > len(trace))):
         beta = np.nan*np.ones(4)
         return beta
@@ -272,12 +301,22 @@ def spline_fit_single_trace(trace, s, knots):
         if len(premax_minima_indices) == 0:
             last_min_before_max = 0
         else:
-            last_min_before_max = minima[premax_minima[-1]]
+            last_min_before_max = minima[premax_minima_indices[-1]]
+    if plot:
+        ax1.plot([last_min_before_max, global_max], spl([last_min_before_max, global_max]), "rx")
     min_val = spl(last_min_before_max)
     halfmax_magnitude = (global_max_val - min_val)/2 + min_val
     try:
-        halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
-                                       bounds=[last_min_before_max, global_max]).x
+#         halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
+#                                        bounds=[last_min_before_max, global_max]).x
+        try:
+            halfmax = np.argmin((spl_values[last_min_before_max:global_max]-\
+                               halfmax_magnitude)**2) + last_min_before_max
+        except Exception as e:
+            beta = np.nan*np.ones(4)
+            return beta            
+        if plot:
+            ax1.plot(halfmax, spl(halfmax), "gx")
     except Exception as e:
         print(extrema)
         print(d2)
@@ -287,7 +326,6 @@ def spline_fit_single_trace(trace, s, knots):
     beta = np.array([global_max, halfmax, global_max_val/min_val,res])
     
     return beta
-    
     
 def correct_photobleach(img, mask=None, method="localmin", nsamps=51):
     """ Perform photobleach correction on each pixel in an image
@@ -398,90 +436,156 @@ def analyze_wave_prop(masked_image, mask, nbins=16, savgol_window=5, dt=1):
 
 def fill_nans_with_neighbors(img):
     isnan = np.isnan(img)
+
+def downsample_video(raw_img, downsample_factor, aa=True):
+    """ Downsample video in space with optional anti-aliasing
+    """
+    if downsample_factor == 1:
+        di = raw_img
+    else:
+        if aa:
+            sos = signal.butter(4, 1/downsample_factor, output='sos')
+            filtered = np.apply_over_axes(lambda a, axis: np.apply_along_axis(lambda x: signal.sosfiltfilt(sos, x), axis, a), raw_img, [1,2])
+            di = transform.downscale_local_mean(filtered, (1,downsample_factor,downsample_factor))
+        else:
+            di = transform.downscale_local_mean(raw_img, (1,downsample_factor,downsample_factor))
+    return di
+
+def get_image_dff_corrected(img, nsamps_corr, mask=None, plot=None, full_output=False):
+    """ Convert image to Delta F/F after doing photobleach correction and sampling 
+    """
     
-def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, savedir=None, prom_pct=90, sta_bounds="auto"):
+    # Generate mask if not provided
+    mean_img = img.mean(axis=0)
+    if mask is None:
+        mask = mean_img > np.percentile(mean_img, 80)
+        kernel_size = int(mask.shape[0]/50)
+        mask = morphology.binary_closing(mask, selem=np.ones((kernel_size, kernel_size)))
+    
+    if plot is not None:
+        _,_ = visualize.display_roi_overlay(mean_img, mask.astype(int), ax=plot)
+    # Correct for photobleaching and convert to DF/F
+    pb_corrected_img = correct_photobleach(img, mask=np.tile(mask, (img.shape[0], 1, 1)), nsamps=nsamps_corr)
+    dFF_img = get_image_dFF(pb_corrected_img)
+    
+    if full_output:
+        return dFF_img, mask
+    else:
+        return dFF_img
+    
+    
+def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, savedir=None, prom_pct=90, sta_bounds="auto", aa=True, exclude_pks = None, offset=0):
     """ Convert raw image into spike triggered average
     """
     if savedir is not None:
         os.makedirs(savedir, exist_ok=True)
 
     if plot:
-        fig1, axes = plt.subplots(2,2, figsize=(10,10))
+        fig1, axes = plt.subplots(2,3, figsize=(15,10))
         axes = axes.ravel()
 
-    # Apply antialiasing filter and downsample 
-    if downsample_factor == 1:
-        di = raw_img
-    else:
-        sos = signal.butter(4, 1/downsample_factor, output='sos')
-        filtered = np.apply_over_axes(lambda x: signal.sosfiltfilt(sos, x), raw_img, [1,2])
-        di = transform.downscale_local_mean(filtered, (1,downsample_factor,downsample_factor))
+    # Downsample
+    di = downsample_video(raw_img, downsample_factor, aa=aa)
+    print("Downsample complete")
+    dFF_img, mask = get_image_dff_corrected(di, 111, plot=axes[0], full_output=True)
+    raw_trace = image_to_trace(di, np.tile(mask, (di.shape[0], 1, 1)))
     
-    # Generate mask if not provided
-    mean_img = di.mean(axis=0)
-    if mask is None:
-        mask = mean_img > np.percentile(mean_img, 80)
-        kernel_size = int(mask.shape[0]/8)
-        mask = morphology.binary_closing(mask, selem=np.ones(kernel_size, kernel_size))
-    _,_ = visualize.display_roi_overlay(mean_img, mask, ax=axes[0])
-
-    # Correct for photobleaching and convert to DF/F
-    pb_corrected_img = correct_photobleach(di, mask=np.tile(mask, (di.shape[0], 1, 1)), nsamps=111)
-    dFF_img = get_image_dFF(pb_corrected_img)
+    ss = StandardScaler()
+    rd, gc = get_region_data(dFF_img, np.ones((dFF_img.shape[1], dFF_img.shape[2])), 1)
+    rd = ss.fit_transform(rd)
+    pca_full = PCA(n_components=5)
+    pca_full.fit(rd)
+    pca_img = generate_cropped_region_image(pca_full.components_[0], gc)
     
-    if savedir:
-        skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img)
 
     dFF_mean = image_to_trace(dFF_img, mask=np.tile(mask, (di.shape[0], 1, 1)))
 
+    if savedir:
+        skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img)
+        skio.imsave(os.path.join(savedir, "pca.tif"), pca_img)
+        np.savez(os.path.join(savedir, "dFF_mean.npz"), dFF_mean=dFF_mean)
+    
     # Identify spikes
     ps = np.percentile(dFF_mean,[10,prom_pct])
     prominence = ps[1] - ps[0]
     pks, _ = signal.find_peaks(dFF_mean, prominence=prominence)
+    
+    if exclude_pks:
+        keep = np.ones(len(pks))
+        keep[exclude_pks] = 0
+        pks = pks[keep]
 
     if plot:
         axes[1].plot(np.arange(dFF_img.shape[0])/fs, dFF_mean)
         axes[1].plot(pks/fs, dFF_mean[pks], "rx")
         axes[1].set_xlabel("Time (s)")
         axes[1].set_ylabel(r"$F/F_0$")
+        tx = axes[1].twinx()
+        tx.plot(np.arange(dFF_img.shape[0])/fs, raw_trace, color="C1")
+        tx.set_ylabel("Mean counts")
+        axes[2].imshow(pca_img)
 
     # Automatically determine bounds for spike-triggered average
     if sta_bounds == "auto":
         # Align all detected peaks of the full trace and take the mean
-        aligned_traces = traces.align_fixed_offset(np.tile(dFF_mean, (len(pks), 1)), pks)
-        mean_trace = aligned_traces.nanmean(axis=0)
+        try:
+            aligned_traces = traces.align_fixed_offset(np.tile(dFF_mean, (len(pks), 1)), pks)
+        except Exception as e:
+            return raw_trace
+        mean_trace = np.nanmean(aligned_traces, axis=0)
         # Smooth
-        smoothed_dfdt = signal.savgol_filter(mean_trace, 15, 2, deriv=1)
-        
+        spl = interpolate.UnivariateSpline(np.arange(len(mean_trace)), np.nan_to_num(mean_trace, nan=np.nanmin(mean_trace)), s=0.001)
+        smoothed = spl(np.arange(len(mean_trace)))
+        smoothed_dfdt = spl.derivative()(np.arange(len(mean_trace)))   
         # Find the first minimum before and the first minimum after the real spike-triggered peak
-        minima_left = np.argwhere((smoothed_dfdt < 0)).ravel()
-        minima_right = np.argwhere((smoothed_dfdt > 0)).ravel()
-        # calculate number of samples to take before and after the peak
-        b1 = pks[-1] - minima_left[minima_right<pks[-1]][-1]
-        b2 = minima_right[minima_right > pks[-1]][0]
-    
-    print(b1, b2)
+        if plot:
+            axes[4].plot(mean_trace)
+            axes[4].plot(smoothed, color="C1")
+            tx = axes[4].twinx()
+            tx.plot(smoothed_dfdt, color="C2")
+            tx.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+        try:
+            minima_left = np.argwhere((smoothed_dfdt < 0)).ravel()
+            minima_right = np.argwhere((smoothed_dfdt > 0)).ravel()
+            # calculate number of samples to take before and after the peak
+            b1 = pks[-1] - minima_left[minima_left<pks[-1]][-1]+offset
+            b2 = minima_right[minima_right > pks[-1]][0] - pks[-1]+offset
+        except Exception:
+            return mean_trace
+        
+        if plot:
+            axes[3].plot([pks[-1]-b1, pks[-1], pks[-1]+b2], mean_trace[[pks[-1]-b1, pks[-1], pks[-1]+b2]], "rx")
+        
+
 
     # Collect spike traces according to bounds
-    spike_traces = np.nan*np.ones(len(pks), b1+b2)
-    spike_images = np.nan*np.ones(dFF_img.shape[0], len(pks), b1+b2)
+    spike_traces = np.nan*np.ones((len(pks), b1+b2))
+    spike_images = np.nan*np.ones((len(pks), b1+b2, dFF_img.shape[1], dFF_img.shape[2]))
+    print(b1,b2)
     for idx, pk in enumerate(pks):
-        n_prepend = np.max(0, b1-pk)
-        n_append = np.max(0, pk+b2-len(dFF_mean))
+        n_prepend = max(0, b1-pk)
+        n_append = max(0, pk+b2-len(dFF_mean))
 
-        mean_block = np.concatenate([np.ones(n_prepend)*np.nan, dFF_mean[pk-b1:pk+b2], np.ones(n_append)*np.nan])
-        img_block = np.concatenate([np.ones(n_prepend, dFF_img.shape[1], dFF_img.shape[2])*np.nan, dFF_mean[pk-b1:pk+b2], np.ones(n_append, dFF_img.shape[1], dFF_img.shape[2])*np.nan])
+        mean_block = np.concatenate([np.ones(n_prepend)*np.nan, dFF_mean[max(0, pk-b1):min(len(dFF_mean), pk+b2)], np.ones(n_append)*np.nan])
+        img_block = np.concatenate([np.ones((n_prepend, dFF_img.shape[1], dFF_img.shape[2]))*np.nan, \
+                                    dFF_img[max(0, pk-b1):min(len(dFF_mean), pk+b2),:,:], np.ones((n_append, dFF_img.shape[1], dFF_img.shape[2]))*np.nan])
         
         spike_traces[idx,:] = mean_block
-        spike_images[idx,:,:] = (img_block)
+        spike_images[idx,:,:] = img_block
     
     sta_trace = np.nanmean(spike_traces, axis=0)
     sta = np.nanmean(spike_images, axis=0)
 
     if plot:
-        axes[2].plot(np.arange(b1+b2)/fs, sta_trace)
+        axes[3].plot(np.arange(b1+b2)/fs, sta_trace)
+        axes[3].set_xlabel("Time (s)")
+        axes[3].set_ylabel(r"$F/F_0$")
+        axes[3].set_title("STA taps: %d + %d" % (b1,b2))
+        plt.tight_layout()
     if savedir:
         skio.imsave(os.path.join(savedir, "sta.tif"), sta)
+        if plot:
+            plt.savefig(os.path.join(savedir, "QA_plots.tif"))
     
     return sta
     
