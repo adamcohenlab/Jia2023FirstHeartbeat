@@ -129,7 +129,16 @@ def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_p
     fwhm = signal.peak_widths(trace, peaks, rel_height=0.5)[0]/f_s
     isi = (peaks[1:] - peaks[:-1])/f_s
     isi = np.append(isi, np.nan)
-    res = pd.DataFrame({"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi})
+    if len(peaks) == 0:
+        return None
+    try:
+        res = pd.DataFrame({"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi})
+    except Exception as e:
+        print(peaks.shape)
+        print(prominences.shape)
+        print(fwhm.shape)
+        print(isi.shape)
+        raise e
     return res
 
 def first_trough_exp_fit(st_traces, before, after, f_s=1):
@@ -239,7 +248,7 @@ def align_fixed_offset(traces, offsets):
     aligned_traces = np.nan*np.ones((traces.shape[0], traces.shape[1]+max_offset))
     for i in range(traces.shape[0]):
         start_idx =  max_offset-offsets[i]
-        aligned_traces[start_idx:start_idx + traces.shape[1]] = traces[i,:]
+        aligned_traces[i, start_idx:start_idx + traces.shape[1]] = traces[i,:]
     return aligned_traces
 
 
@@ -519,11 +528,16 @@ class TimelapseArrayExperiment():
     def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5):
         dfs = []
         for roi in range(self.n_rois):
-            df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold, f_s=self.f_s, auto_prom_scale=auto_prom_scale, auto_thresh_scale=auto_thresh_scale)
-            df["t"] = self.t[df["peak_idx"]]
-            df["roi"] = roi
-            df["hpf"] = df["t"]/3600 + self.start_hpf
-            dfs.append(df)
+            try:
+                df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold, f_s=self.f_s, auto_prom_scale=auto_prom_scale, auto_thresh_scale=auto_thresh_scale)
+            except Exception as e:
+                print("ROI: %d" % roi)
+                raise e
+            if df is not None:
+                df["t"] = self.t[df["peak_idx"]]
+                df["roi"] = roi
+                df["hpf"] = df["t"]/3600 + self.start_hpf
+                dfs.append(df)
         self.peaks_data = pd.concat(dfs, axis=0).set_index("roi")
         self.peaks_found = True
 
@@ -536,7 +550,7 @@ class TimelapseArrayExperiment():
         spike_stats_by_roi = []
         segment_edges = self._find_segment_edges()
 
-        for roi in range(self.n_rois):
+        for roi in self.peaks_data.index.unique():
             peak_data = self.peaks_data.loc[roi]
             peak_indices = np.array(peak_data["peak_idx"])
             window_indices = np.arange(0, self.dFF.shape[1]-window, step=int(window - overlap*window))
