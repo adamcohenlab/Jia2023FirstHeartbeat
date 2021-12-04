@@ -30,10 +30,13 @@ def find_stim_starts(crosstalk_mask, expected_period, dt=1):
             curr_stim = rising_ts[i]
     return rising_ts[valid_stims.astype(bool)]
 
-def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4), trace_color="C1", stim_color="blue", scale="axis", scalebar_params=None):
+def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4), trace_color="C1", stim_color="blue", scale="axis", scalebar_params=None, axis=None):
     """ Plot a trace with rectangles indicating stimulation
     """
-    fig1, ax1 = plt.subplots(figsize=(12,4))
+    if axis is None:
+        fig1, ax1 = plt.subplots(figsize=(12,4))
+    else:
+        ax1 = axis
     ax1.plot(np.arange(len(trace))*dt, trace, color=trace_color)
     for st in stims:
         r = patches.Rectangle((st, start_y), width, height, color=stim_color)
@@ -44,18 +47,7 @@ def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsiz
     elif scale == "bar":
         if scalebar_params is None:
             raise ValueError("scalebar_params required")
-        ax1.set_axis_off()
-        xlim = ax1.get_xlim()
-        ylim = ax1.get_ylim()
-        aspect = np.abs(xlim[0] - xlim[1])/np.abs(ylim[0] - ylim[1])
-        r1 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"], scalebar_params["time_scale"], scalebar_params["thickness"], color="black")
-        r2 = patches.Rectangle(scalebar_params["corner_x"], scalebar_params["corner_y"]-scalebar_params["ampl_scale"]+scalebar_params["thickness"], scalebar_params["thickness"]*aspect, scalebar_params["ampl_scale"], color="black")
-        
-        offset = scalebar_params["width"]*0.05
-        ax1.text(scalebar_params["corner_x"] + offset, scalebar_params["corner_y"] + offset, "%d s" % scalebar_params["timescale"], size=scalebar_params["fontsize"])
-        ax1.text(scalebar_params["corner_x"] + offset, scalebar_params["corner_y"] + offset, "%d s" % scalebar_params["ampl_scale"], size=scalebar_params["fontsize"], rotation=90)
-        ax1.add_patch(r1)
-        ax1.add_patch(r2)
+        visualize.plot_scalebars(ax1, scalebar_params)
     return fig1, ax1
 
 def correct_photobleach(trace, method="linear", nsamps=None):
@@ -167,7 +159,7 @@ def first_trough_exp_fit(st_traces, before, after, f_s=1):
 
     return pd.Series({"alpha":alpha, "c":c, "alpha_err":alpha_err, "c_err":c_err})
 
-def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot=False, fs=1, mode="remove", max_width=10, lpad=0, rpad=0):
+def remove_stim_crosstalk(trace, method="zscore", side="both", freq_cutoff=0.1, threshold=2, plot=False, fs=1, mode="remove", max_width=10, lpad=0, rpad=0, expected_stim_width=None, fixed_width_remove=False):
     """ Remove optical crosstalk from e.g. channelrhodopsin stimulation
 
     """
@@ -187,6 +179,8 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot
     elif method == "peak_detect":
         # Use z-score to avoid mean variation
         zsc = stats.zscore(trace)
+        sos = signal.butter(5, freq_cutoff, 'hp', fs=fs, output='sos')
+        zsc = signal.sosfilt(sos, zsc-np.mean(zsc))
         if side == "both":
             zsc = np.abs(zsc)
         elif side == "upper":
@@ -195,10 +189,18 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", threshold=2, plot
             zsc = - zsc
         else:
             raise ValueError("Invalid value for parameter side")
-        peaks, _ = signal.find_peaks(zsc, prominence=threshold, width=(1,max_width))
+        if expected_stim_width is None:
+            peaks = np.argwhere(zsc> threshold).ravel()
+        else:
+            peaks, _ = signal.find_peaks(zsc, prominence=threshold, wlen=expected_stim_width+2)
         _, _, lips, rips = signal.peak_widths(zsc, peaks, rel_height=0.1)
-        lips = np.floor(lips).astype(int)-lpad
-        rips = np.ceil(rips).astype(int)+rpad
+        if fixed_width_remove:
+            # For the case that the crosstalks are almost as long as the period between true spikes
+            lips = peaks - lpad
+            rips = peaks + rpad
+        else:
+            lips = np.floor(lips).astype(int)-lpad
+            rips = np.ceil(rips).astype(int)+rpad
         mask = np.zeros_like(trace, dtype=bool)
         for j in range(len(lips)):
             mask[lips[j]-1:rips[j]+1] = True
@@ -232,9 +234,11 @@ def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
     """
     spike_traces = np.ones((len(peak_indices), before+after))*np.nan
     for pk_idx, pk in enumerate(peak_indices):
-        spike_trace = np.concatenate([np.ones(max(before - pk, 0))*np.nan,
+        before_pad_length = max(before - pk, 0)
+        after_pad_length = max(0, pk+after - len(trace))
+        spike_trace = np.concatenate([np.ones(before_pad_length)*np.nan,
                                                 trace[max(0, pk-before):min(len(trace),pk+after)],
-                                        np.ones(max(0, pk+after - len(trace)))*np.nan])
+                                        np.ones(after_pad_length)*np.nan])
         if normalize_height:
             spike_trace /= np.nanmax(spike_trace)
         spike_traces[pk_idx,:] = spike_trace
@@ -253,7 +257,7 @@ def align_fixed_offset(traces, offsets):
 
 
 def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True):
-    """ Generate spike-triggered average
+    """ Generate spike-triggered average from given reference indices (peaks or stimuli)
 
     """
     spike_traces = get_spike_traces(trace, peak_indices, before, after, normalize_height)
@@ -263,6 +267,26 @@ def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True):
     else:
         sta = np.nanmean(spike_traces, axis=0)
     return sta
+
+def spike_match_to_kernel(kernel, trace, peak_indices, normalize_height=True, full_output=False):
+    """ Compare consecutive spikes in a trace to a known kernel
+    """
+    if normalize_height:
+        kernel = (kernel - np.min(kernel))/(np.max(kernel)-np.min(kernel))
+        trace = (trace - np.min(trace))/(np.max(trace)-np.min(trace))
+    corr = signal.correlate(trace, kernel, mode="same")
+    local_maxes = []
+    for idx, pi in enumerate(peak_indices):
+        if idx == len(peak_indices)-1:
+            next_peak = len(corr)
+        else:
+            next_peak = peak_indices[idx+1]
+        local_maxes.append(np.max(corr[pi:next_peak]))
+    if full_output:
+        return local_maxes, corr
+    else:
+        return local_maxes
+
 
 def analyze_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, fitting_function=first_trough_exp_fit):
     """ Generate spike-triggered average from trace and indices of peaks, as well as associated statistics
@@ -402,7 +426,8 @@ class TimelapseArrayExperiment():
         return fig1, ax1
 
     def load_traces(self, filter_function=standard_lp_filter, timepoints=None, per_trace_start=0, background_subtract=False, \
-        scale_lowest_mean=False, end_index=0, custom_timepoints=[], custom_preprocessing_functions = [], pb_window=401):
+        scale_lowest_mean=False, end_index=0, custom_timepoints=[], custom_preprocessing_functions = [], pb_window=401, \
+                    corr_photobleach = True):
         """ Load and merge traces from individual data CSVs containing time blocks for arrays of embryos.
         """
         if timepoints is None:
@@ -429,7 +454,7 @@ class TimelapseArrayExperiment():
             # Get background of traces (either based on ROI selection, or a level from frames with no excitation associated with each timepoint)
             if background_subtract=="roi":
                 background = pd.read_csv(os.path.join(self.data_folder, "background_traces/%s_traces.csv" % exptname)).set_index("z").loc[0].set_index("region")
-            elif isinstance(background_subtract, int):            
+            elif isinstance(background_subtract, int) and background_subtract > 0:            
                 background = data.loc[all_time_indices[-background_subtract:]]
                 background = background.reset_index().set_index("region")
 
@@ -442,6 +467,8 @@ class TimelapseArrayExperiment():
             # Move back to indexing by ROI
             data = data.reset_index().set_index("region")
             regions = list(data.index.unique("region"))
+#             print(regions)
+#             print(len(t_timepoint))
 
             # Initialize raw data arrays for the current timepoint
             raw_data_timepoint = np.zeros((len(regions), len(t_timepoint)))
@@ -455,10 +482,10 @@ class TimelapseArrayExperiment():
                 raw_data_timepoint[i,:]
                 if background_subtract=="roi":
                     background_timepoint[i,:] = background.loc[roi]["mean_intensity"][per_trace_start:]
-                elif isinstance(background_subtract, int):
+                elif isinstance(background_subtract, int) and background_subtract > 0:
                     roi_trace -= np.mean(background.loc[roi]["mean_intensity"])
-                
-                roi_trace, _ = correct_photobleach(roi_trace, method="localmin", nsamps=pb_window)
+                if corr_photobleach:
+                    roi_trace, _ = correct_photobleach(roi_trace, method="localmin", nsamps=pb_window)
                 raw_data_timepoint[i,:] = roi_trace
             
             # Load blocks
@@ -474,11 +501,13 @@ class TimelapseArrayExperiment():
                 data_blocks[idx] = data_blocks[idx]/scalings[:,idx][:,np.newaxis]
         
         # Convert raw intensity to DF/F
+#         print(len(data_blocks))
         for idx in range(len(data_blocks)):
             if background_subtract=="roi":
                 background=np.apply_along_axis(filter_function, 1, background_blocks[idx])
             else:
                 background = np.zeros_like(data_blocks[idx])
+#             print(data_blocks[idx].shape)
             filtered_intensity = np.apply_along_axis(filter_function, 1, data_blocks[idx])
             dFFs = np.apply_along_axis(intensity_to_dff, 1, filtered_intensity-background)
             dFF_blocks.append(dFFs)
@@ -526,6 +555,8 @@ class TimelapseArrayExperiment():
         return self.block_metadata["file_name"].iloc[idx]
 
     def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5):
+        """ Apply scipy detect_peaks on all ROIs and 
+        """
         dfs = []
         for roi in range(self.n_rois):
             try:
@@ -541,7 +572,9 @@ class TimelapseArrayExperiment():
         self.peaks_data = pd.concat(dfs, axis=0).set_index("roi")
         self.peaks_found = True
 
-    def get_windowed_peak_stats(self, window, prominence="auto", overlap=0.5, isi_stat_min_peaks=7, sta_before=0, sta_after=0, wlen=400):
+    def get_windowed_peak_stats(self, window, prominence=None, height=None, overlap=0.5, isi_stat_min_peaks=7, sta_before=0, sta_after=0, wlen=400):
+        """ Get ISI statistics averaged over a moving window
+        """
         if not self.peaks_found:
             raise Exception("Run analyze_peaks first")
 
@@ -552,6 +585,16 @@ class TimelapseArrayExperiment():
 
         for roi in self.peaks_data.index.unique():
             peak_data = self.peaks_data.loc[roi]
+            filter_mask = np.ones(peak_data.shape[0], dtype=bool)
+            if prominence is not None:
+                filter_mask = np.bitwise_and(filter_mask, \
+                                             peak_data["prominence"] > np.percentile(peak_data["prominence"], prominence))
+            if height is not None:
+                filter_mask = np.bitwise_and(filter_mask, \
+                                             self.dFF[roi,:][peak_data["peak_idx"]] > height*np.percentile(self.dFF[roi,:][peak_data["peak_idx"]], 95))
+            
+            peak_data = peak_data[filter_mask]
+            
             peak_indices = np.array(peak_data["peak_idx"])
             window_indices = np.arange(0, self.dFF.shape[1]-window, step=int(window - overlap*window))
             
@@ -617,21 +660,59 @@ class TimelapseArrayExperiment():
         return fig1, ax1
     
 
-    def plot_spikes(self, roi, figsize=(12,6), time="s"):
+    def plot_spikes(self, rois=None, figsize=(12,4), time="s"):
         """Plot spikes found using find_peaks on DF/F 
         
         """
+        if rois is None:
+            rois = np.arange(self.n_rois)
+        elif isinstance(rois, int):
+            rois = [rois]
+        
+        n_rows = len(rois)//2+1
+        fig1, axes = plt.subplots(n_rows, 2, figsize=(figsize[0], figsize[1]*n_rows))
+        axes = axes.ravel()
         t, _ = self._get_time(time)
-        roi_peaks = self.peaks_data.loc[roi]
-        peak_indices = roi_peaks["peak_idx"]
         
-        fig1, ax1 = plt.subplots(figsize=figsize)
-        ax1.plot(t, self.dFF[roi,:])
-        ax1.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
+        for idx, ax in enumerate(axes):
+            roi = rois[idx]
+            roi_peaks = self.peaks_data.loc[roi]
+            peak_indices = roi_peaks["peak_idx"]
+
+
+            ax.plot(t, self.dFF[roi,:])
+            ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
+            ax.set_xlabel("Time (%s)" % time)
+            ax.set_ylabel(r"$\Delta F/F$")
+            ax.set_title("ROI %d" % roi)
+        plt.tight_layout()
+        return fig1, axes
+    
+    def plot_spikes_with_mask(self, mask, rois=None, figsize=(16,4), img_size=4, time="s"):
+        if rois is None:
+            rois = np.arange(self.n_rois)
+        elif isinstance(rois, int):
+            rois = [rois]
         
-        ax1.set_xlabel("Time (%s)" % time)
-        ax1.set_ylabel(r"$\Delta F/F$")
-        return fig1, ax1
+        n_rows = len(rois)
+        fig1, axes = plt.subplots(n_rows, 2, figsize=(figsize[0], figsize[1]*n_rows), \
+                                  gridspec_kw={"width_ratios": [figsize[0]-img_size, img_size]})
+        t, _ = self._get_time(time)
+        
+        for idx in range(len(rois)):
+            roi = rois[idx]
+            ax = axes[idx,0]
+            roi_peaks = self.peaks_data.loc[roi]
+            peak_indices = roi_peaks["peak_idx"]
+            ax.plot(t, self.dFF[roi,:])
+            ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
+            ax.set_xlabel("Time (%s)" % time)
+            ax.set_ylabel(r"$\Delta F/F$")
+            ax.set_title("ROI %d" % roi)
+            
+            axes[idx,1].imshow(mask==(roi+1))
+        plt.tight_layout()
+        return fig1, axes
 
     def plot_peak_quality_metrics(self, rois, figsize=(10,10), ma_window=400, time="hpf"):
         """ Plot peak quality metrics:

@@ -3,14 +3,15 @@ import scipy.ndimage as ndi
 import skimage.io as skio
 from scipy import signal, stats, interpolate, optimize
 import matplotlib.pyplot as plt
-from skimage import transform, filters, morphology
+from skimage import transform, filters, morphology, measure
+from scipy.fft import fft, fftfreq
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import os
 
 from . import traces
 from .. import utils
 from ..ui import visualize
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-import os
 
 def refine_segmentation_pca(img, mask, n_components=10, threshold_percentile=70):
     """ Refine manual segmentation to localize the heart using PCA assuming that transients are the largest fluctuations present.
@@ -118,9 +119,12 @@ def image_to_trace(img, mask = None):
     """
     if mask is None:
         trace = img.mean(axis=(1,2))
-    else:
+    elif len(mask.shape)==3:
         masked_img = np.ma.masked_array(img, mask=~mask)
         trace = masked_img.mean(axis=(1,2))
+    else:
+        pixel_traces = img[:, mask]
+        trace = pixel_traces.mean(axis=1)
     return trace
 
 def interpolate_invalid_values(img, mask):
@@ -474,7 +478,7 @@ def get_image_dff_corrected(img, nsamps_corr, mask=None, plot=None, full_output=
         return dFF_img
     
     
-def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, savedir=None, prom_pct=90, sta_bounds="auto", aa=True, exclude_pks = None, offset=0):
+def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, savedir=None, prom_pct=90, sta_bounds="auto", aa=True, dff_time_downsample=1, exclude_pks = None, offset=0):
     """ Convert raw image into spike triggered average
     """
     if savedir is not None:
@@ -501,7 +505,10 @@ def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, save
     dFF_mean = image_to_trace(dFF_img, mask=np.tile(mask, (di.shape[0], 1, 1)))
 
     if savedir:
-        skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img)
+        if dff_time_downsample > 1:
+            skio.imsave(os.path.join(savedir, "dFF.tif"), transform.downscale_local_mean(raw_img, (dff_time_downsample,1,1)))
+        else:
+            skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img)
         skio.imsave(os.path.join(savedir, "pca.tif"), pca_img)
         np.savez(os.path.join(savedir, "dFF_mean.npz"), dFF_mean=dFF_mean)
     
@@ -509,6 +516,9 @@ def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, save
     ps = np.percentile(dFF_mean,[10,prom_pct])
     prominence = ps[1] - ps[0]
     pks, _ = signal.find_peaks(dFF_mean, prominence=prominence)
+    
+    if len(pks) == 0:
+        return None
     
     if exclude_pks:
         keep = np.ones(len(pks))
@@ -586,7 +596,262 @@ def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, save
         skio.imsave(os.path.join(savedir, "sta.tif"), sta)
         if plot:
             plt.savefig(os.path.join(savedir, "QA_plots.tif"))
-    
     return sta
+
+# def identify_hearts(img, expected_embryos, prev_coms=None, prev_mask_labels=None, fill_missing=True, band_bounds=(0.1, 1), \
+#                    band_cutoff=0.4, full_output=False, opening_size=5, dilation_size=15, f_s=1):
+#     """ Pick out hearts from widefield experiments using PCA and power content in frequency band
+#     """
+    
+#     mean_img = img.mean(axis=0)
+#     std_img = np.std(img, axis=0)
+#     cv_img = std_img/mean_img
+#     intensity_mask = mean_img > np.percentile(mean_img, 75)
+#     cv_img[~intensity_mask] = 0
+    
+#     cv_mask = cv_img > np.percentile(cv_img[intensity_mask],85)
+    
+#     xx = morphology.binary_opening(cv_mask, selem= np.ones((opening_size,opening_size)))
+#     xxx = morphology.binary_dilation(xx, selem= np.ones((dilation_size,dilation_size)))
+#     labelled = measure.label(xxx)
+#     rd, gc = get_all_region_data(img, labelled)
+    
+#     new_mask = np.zeros_like(mean_img, dtype=bool)
+    
+#     for i, regiondata in enumerate(rd):
+#         pca = PCA(n_components=5)
+#         rd_norm = regiondata-np.mean(regiondata, axis=0)
+#         rd_norm = rd_norm/np.max(np.abs(rd_norm), axis=0)
+#         pca.fit(rd_norm)
+#         for c in pca.components_:
+#             trace = np.matmul(rd_norm, c)
+#             N = len(trace)
+#             yf = fft(trace)
+#             xf = fftfreq(len(trace), 1/f_s)[:N//2]
+#             abs_power = np.abs(yf[0:N//2])
+#             norm_abs_power = abs_power/np.sum(abs_power)
+#             band_power = np.sum(norm_abs_power[(xf>band_bounds[0]) & (xf<band_bounds[1])])
+#             if band_power > band_cutoff:
+#                 comp_abs = np.abs(c)
+#                 correct_indices = comp_abs > filters.threshold_otsu(comp_abs)
+#                 mask_coords = gc[i][correct_indices]
+#                 mask_coords = tuple(zip(*mask_coords.tolist()))
+#                 new_mask[mask_coords] = 1
+#                 break
+#     new_mask = morphology.binary_opening(new_mask, selem=np.ones((opening_size,opening_size)))
+#     new_mask = morphology.binary_dilation(new_mask, selem=np.ones((dilation_size,dilation_size)))
+#     closing_size = ((int(dilation_size*1.5))//2)*2+1
+#     new_mask = morphology.binary_closing(new_mask, selem=np.ones((closing_size,closing_size)))
+    
+#     new_mask_labels = measure.label(new_mask)
+# #     fig1, axes = plt.subplots(1,3, figsize=(12,4))
+# #     axes[0].imshow(new_mask_labels)
+
+#     coms = ndi.center_of_mass(new_mask, labels=new_mask_labels, index=np.arange(1,np.max(new_mask_labels)+1))
+#     coms = np.array(coms)
     
     
+    
+# #     print(len(coms))
+#     if len(coms) > expected_embryos:
+#         plt.imshow(new_mask_labels)
+#         print("Extra segments found, sorting by band power")
+        
+#         band_powers = []
+#         for roi in range(1, np.max(new_mask_labels)+1):
+#             trace = image_to_trace(img, \
+#                                           mask=np.tile(new_mask_labels==roi, \
+#                                                        (img.shape[0],1,1)))
+#             yf = fft(trace -np.mean(trace))
+#             xf = fftfreq(len(trace), 1/f_s)[:N//2]
+#             abs_power = np.abs(yf[0:N//2])
+#             norm_abs_power = abs_power/np.sum(abs_power)
+#             band_power = np.sum(norm_abs_power[(xf>band_bounds[0]) & (xf<band_bounds[1])])
+#             band_powers.append(band_power)
+            
+
+#         indices_to_keep = np.argsort(-np.array(band_powers))[:expected_embryos]
+#         coms = coms[indices_to_keep,:]
+#         ml_temp = np.zeros_like(new_mask_labels)
+#         for i, j in enumerate(indices_to_keep):
+#             ml_temp[new_mask_labels==j+1] = i+1
+#         new_mask_labels = ml_temp
+        
+#     if prev_coms is not None:
+# #         print("Detected COMs: %d" % coms.shape[0])
+# #         print("Previous frame COMs: %d" % prev_coms.shape[0])
+#         new_coms_ordered = {}
+#         n_new_rois = 0
+#         new_mask_copy = np.zeros_like(new_mask_labels, dtype=np.uint8)
+        
+#         unassigned_coms = []
+#         # Try to link ROIs segmented from this image to ROIs from previous image so index is maintained
+#         for idx in range(coms.shape[0]):
+#             com = coms[idx,:]
+#             dist = np.sum(np.power(com - prev_coms,2), axis=1)
+#             min_idx = np.argmin(dist)
+#             if np.sqrt(dist[min_idx]) < 25:
+# #                 print(idx)
+#                 new_mask_copy[new_mask_labels==(idx+1)] = min_idx+1
+#                 if min_idx in new_coms_ordered:
+#                     new_coms_ordered[min_idx] = np.mean([com, new_coms_ordered[min_idx]])
+#                 else:
+#                     new_coms_ordered[min_idx] = com
+#             # If a ROI was not found in the neighborhood of one from the previous image, add a new value
+#             elif prev_coms.shape[0] + n_new_rois < expected_embryos:
+#                 n_new_rois += 1
+#                 new_label_val = prev_coms.shape[0] + n_new_rois
+# #                 print("New label found %d" % new_label_val)
+#                 new_mask_copy[new_mask_labels==(idx+1)] = new_label_val
+#                 new_coms_ordered[new_label_val-1] = com
+#             else:
+#                 unassigned_coms.append(com)
+        
+#         # If any ROIs from the previous image were missing, fill them in
+#         if fill_missing:
+#             new_labels = set(np.unique(new_mask_copy).tolist())
+#             old_labels = set(np.unique(prev_mask_labels).tolist())
+            
+#             missing_old_labels = old_labels - new_labels
+# #             print("Missing old labels ", missing_old_labels)
+            
+#             for ol in missing_old_labels:
+#                 new_mask_copy[prev_mask_labels==ol] = ol
+#                 new_coms_ordered[ol-1] = prev_coms[ol-1,:]
+#         new_mask_labels = new_mask_copy
+#         coms = np.zeros((len(new_coms_ordered), 2))
+# #         print("New COMs length: %d" % len(new_coms_ordered))
+# #         all_indices_assigned = []
+#         for idx, com in new_coms_ordered.items():
+#             coms[idx, :] = com
+# #             all_indices_assigned.append(idx)
+# #         print(sorted(all_indices_assigned))
+# #         axes[1].imshow(new_mask_labels)
+# #         axes[2].imshow(new_mask_labels-prev_mask_labels)
+# #         plt.tight_layout()
+#     print(coms.shape)
+#     if full_output:
+#         return new_mask_labels, coms, intensity_mask, cv_mask, labelled
+#     else:
+#         return new_mask_labels, coms
+
+def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=True, band_bounds=(0.1, 2), \
+                   band_threshold=0.45, full_output=False, opening_size=5, dilation_size=15, f_s=1, \
+                     intensity_threshold=0.5, bbox_offset=5, corr_threshold=0.9):
+    """ Pick out hearts from widefield experiments using PCA and power content in frequency band
+    """
+#     print("band_bounds:", band_bounds)
+#     print("band_threshold:", band_threshold)
+#     print("opening_size:", opening_size)
+#     print("dilation_size:", dilation_size)
+#     print("f_s:", f_s)
+    mean_img = img.mean(axis=0)
+    zeroed_image = img-mean_img
+    intensity_mask = mean_img > np.percentile(mean_img, intensity_threshold*100)
+    pixelwise_fft = fft(zeroed_image, axis=0)
+
+    N_samps = img.shape[0]
+    
+    fft_freq = fftfreq(N_samps, 1/f_s)[:N_samps//2]
+
+    abs_power = np.abs(pixelwise_fft[:N_samps//2,:,:])**2
+    norm_abs_power = abs_power/np.sum(abs_power, axis=0)
+
+    band_power = np.sum(norm_abs_power[(fft_freq>band_bounds[0]) & (fft_freq<band_bounds[1]),:,:], axis=0)
+    smoothed_band_power = filters.median(band_power, selem=np.ones((5,5)))
+    processed_band_power = morphology.binary_opening((smoothed_band_power > band_threshold)\
+                                                     *(intensity_mask), selem=np.ones((3,3)))
+    initial_guesses = measure.label(processed_band_power)
+    bboxes = [p["bbox"] for p in measure.regionprops(initial_guesses)]
+    new_mask = np.zeros_like(mean_img, dtype=bool)
+#     new_mask_labels = np.deepcopy(initial_guesses)
+    n_rois = np.max(initial_guesses)
+    corr_img = np.zeros((n_rois, mean_img.shape[0], mean_img.shape[1]), dtype=float)
+
+    
+    for i in range(1, n_rois+1):
+        bbox = bboxes[i-1]
+        r1 = max(bbox[0]-bbox_offset, 0)
+        c1 = max(bbox[1]-bbox_offset, 0)
+        r2 = min(bbox[2]+bbox_offset, initial_guesses.shape[0])
+        c2 = min(bbox[3]+bbox_offset, initial_guesses.shape[1])
+#         print(r1,r2,c1,c2)
+        roi_mask = np.zeros_like(initial_guesses, dtype=bool)
+        roi_mask[r1:r2, c1:c2] = 1    
+    
+        initial_trace = image_to_trace(zeroed_image, mask = roi_mask)
+        
+
+        roi_traces = zeroed_image[:,roi_mask]
+#         print(roi_traces.shape)
+        corrs = np.apply_along_axis(lambda x: stats.pearsonr(initial_trace, x)[0], 0, roi_traces)
+        corrs = corrs.reshape((r2-r1, c2-c1))
+        corr_img[i-1, r1:r2, c1:c2] = corrs
+        
+    corr_mask = morphology.binary_opening(np.max(corr_img>corr_threshold, axis=0), selem=np.ones((opening_size,opening_size)))
+#     remaining_rois = np.unique(initial_guesses[corr_mask])
+#     print(remaining_rois)
+#     remaining_rois = remaining_rois[np.nonzero(remaining_rois)]
+#     for i in remaining_rois:
+#         new_mask[initial_guesses==i] = 1
+#     print(dilation_size)
+    new_mask = morphology.binary_dilation(corr_mask, selem=np.ones((dilation_size, dilation_size)))
+    
+    new_mask_labels = measure.label(new_mask)
+
+    coms = ndi.center_of_mass(new_mask, labels=new_mask_labels, index=np.arange(1,np.max(new_mask_labels)+1))
+    coms = np.array(coms)
+
+    print(coms.shape)
+    if full_output:
+        return new_mask_labels, coms, intensity_mask, smoothed_band_power, initial_guesses, corr_img
+    else:
+        return new_mask_labels, coms
+
+def segment_widefield_series(filepaths, expected_embryos, downsample_factor=1, remove_from_start=0, remove_from_end=0, opening_size=3, dilation_size=3, band_bounds=(0.1,2), f_s=1, band_threshold=0.45, intensity_threshold=0.5, corr_threshold=0.9):
+    """ Run heart segmentation for widefield experiments on all files in a folder.
+    Expected in true chronological order (not reverse).
+    """
+    curr_labels = None
+    curr_coms = None
+    raw = None
+    frames = []
+    exclude_from_write = np.zeros(len(filepaths), dtype=bool)
+    img_shape = None
+    # Perform inital segmentation
+    for idx, f in enumerate(np.flip(filepaths)):
+        try:
+            del raw
+        except Exception as e:
+            pass
+        print(f)
+        try:
+            raw = skio.imread(f)
+            if img_shape is None:
+                img_shape = raw.shape[1:3]
+            else:
+                if raw.shape[1:3] != img_shape:
+                    raise Exception("Incorrect image shape")
+            raw = raw[remove_from_start:raw.shape[0]-remove_from_end,:,:]
+        except Exception as e:
+            print(e)
+            exclude_from_write[idx] = 1
+            continue
+        if downsample_factor > 1:
+            downsample = transform.downscale_local_mean(raw, (1,downsample_factor,downsample_factor))
+        else:
+            downsample = raw
+        try:
+            curr_labels, curr_coms = identify_hearts(downsample, \
+                        prev_coms=curr_coms, prev_mask_labels=curr_labels, \
+                        opening_size=opening_size, dilation_size=dilation_size, band_threshold=band_threshold, \
+                                                     intensity_threshold=intensity_threshold, \
+                                                 band_bounds=band_bounds, f_s=f_s, corr_threshold=corr_threshold)
+        except Exception as e:
+            print(e)
+            print(curr_coms)
+            pass
+        frames.append(np.copy(curr_labels))
+        
+    vid = np.array(frames)
+    return vid, np.flip(exclude_from_write)
