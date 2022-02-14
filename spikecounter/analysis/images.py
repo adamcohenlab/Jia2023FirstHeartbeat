@@ -8,10 +8,43 @@ from scipy.fft import fft, fftfreq
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import os
+import mat73
+import warnings
+
 
 from . import traces
 from .. import utils
 from ..ui import visualize
+
+def load_image(rootdir, expt_name, subfolder=""):
+    d = os.path.join(rootdir, subfolder)
+    
+    all_files = os.listdir(d)
+    expt_files = 0
+    for f in all_files:
+        if expt_name in f and ".tif" in f:
+            expt_files +=1
+    if expt_files == 1:
+        img = skio.imread(os.path.join(d, "%s.tif" % expt_name))
+    else:
+        img = [skio.imread(os.path.join(d, "%s_block%d.tif" % (expt_name, block+1))) for block in range(expt_files)]
+        img = np.concatenate(img, axis=0)
+    
+    expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
+    
+    fc_max = np.max(expt_data["frame_counter"])
+    if fc_max > img.shape[0]:
+        warnings.warn("%d frames dropped" % (fc_max - img.shape[0]))
+        last_tidx = img.shape[0]
+    else:
+        last_tidx = fc_max
+    
+    return img[:last_tidx,:,:], expt_data
+    
+def generate_invalid_frame_indices(stim_trace):
+    invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
+    invalid_indices_camera = np.concatenate((invalid_indices_daq, invalid_indices_daq+1))
+    return invalid_indices_camera
 
 def refine_segmentation_pca(img, mask, n_components=10, threshold_percentile=70):
     """ Refine manual segmentation to localize the heart using PCA assuming that transients are the largest fluctuations present.
@@ -91,6 +124,19 @@ def generate_cropped_region_image(intensity, global_coords):
             img[:,px[0], px[1]] = intensity[:, idx]
     return img
 
+def get_bbox_images(img, mask, padding = 0):
+    """ Get cropped images defined by the bounding boxes of ROIS provided by a mask
+    """
+    bboxes = [p["bbox"] for p in measure.regionprops(mask)]
+    cropped_images = []
+    for bbox in bboxes:
+        r1 = max(bbox[0]-padding, 0)
+        c1 = max(bbox[1]-padding, 0)
+        r2 = min(bbox[2]+padding, img.shape[1])
+        c2 = min(bbox[3]+padding, img.shape[2])
+        cropped_images.append(img[:, r1:r2, c1:c2])
+    return cropped_images
+
 def display_pca_data(pca, raw_data, gc, n_components=5):
     """ Show spatial principal components of a video and the corresponding temporal trace (dot product).
     """
@@ -105,13 +151,16 @@ def display_pca_data(pca, raw_data, gc, n_components=5):
         axes[1].set_title("PC Value")
         axes[1].plot(tr)
 
-def spike_mask_to_stim_index(spike_mask):
+def spike_mask_to_stim_index(spike_mask, pos="start"):
     """ Convert detected spikes from crosstalk into a end of stimulation index for spike-triggered averaging
 
     """
-    diff_mask = spike_mask[1:].astype(int) - spike_mask[:-1].astype(int)
-    stim_end = np.argwhere(diff_mask==-1).ravel()+1
-    return stim_end
+    diff_mask = np.diff(spike_mask.astype(int))
+    if pos == "start":
+        stims = np.argwhere(diff_mask==1).ravel()
+    elif pos == "end":
+        stims = np.argwhere(diff_mask==-1).ravel()+1
+    return stims
 
 def image_to_trace(img, mask = None):
     """ Convert part of an image to a trace according to a mask
@@ -258,19 +307,14 @@ def kernel_fit_single_trace(trace, kernel, minshift, maxshift, offset_width):
     beta = np.append(beta, error_det)
     return beta
 
-def spline_timing(img, s=0.1, n_knots=4):
-    knots = np.linspace(0, img.shape[0]-1, num=n_knots)[1:-1]
-    beta = np.apply_along_axis(lambda tr: spline_fit_single_trace(tr, s, knots), 0, img)
-    return beta
-
-def spline_fit_single_trace(trace, s, knots, plot=False):
+def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0.01):
     """ Least squares spline fitting of a single timeseries
     """
     x = np.arange(len(trace))
+    trace[np.isnan(trace)] = np.min(trace)
     (t,c,k), res,_,_ = interpolate.splrep(x,trace, s=s, task=-1,t=knots, full_output=True,k=3)
     spl = interpolate.BSpline(t,c,k)
-    spl_values = spl(x)
-    
+    spl_values = spl(x)    
     if plot:
         fig1, ax1 = plt.subplots(figsize=(12,4))
         ax1.plot(trace)
@@ -278,6 +322,17 @@ def spline_fit_single_trace(trace, s, knots, plot=False):
     
     dspl = spl.derivative()
     d2spl = spl.derivative(nu=2)
+    
+    def custom_newton_lsq(x, y, bounds = (-np.inf, np.inf)):
+        """ solve for spline being a particular value, i.e. (spl(x) - y)**2 = 0
+        """
+        fx = spl(x)**2 - 2*y*spl(x) + y**2
+        dfx = 2*dspl(x)*spl(x) - 2*y*dspl(x)
+        x1 = x - fx/dfx
+        x1 = max(bounds[0], x1)
+        x1 = min(bounds[1], x1)
+        return x1
+    
 #     naive_max = np.argmax(spl_values)
 #     naive_min = np.argmin(spl_values[:naive_max])
 #     e1 = optimize.fsolve(dspl, naive_max-5)
@@ -290,7 +345,7 @@ def spline_fit_single_trace(trace, s, knots, plot=False):
         ax1.plot(extrema, extrema_values, "ko")
     if np.all(np.logical_or(extrema < 0, extrema > len(trace))):
         beta = np.nan*np.ones(4)
-        return beta
+        return beta, spl
     global_max_index = np.argmax(extrema_values)
     global_max = extrema[global_max_index]
     global_max_val = extrema_values[global_max_index]
@@ -314,11 +369,21 @@ def spline_fit_single_trace(trace, s, knots, plot=False):
 #         halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
 #                                        bounds=[last_min_before_max, global_max]).x
         try:
-            halfmax = np.argmin((spl_values[last_min_before_max:global_max]-\
+            hm = np.argmin((spl_values[last_min_before_max:global_max]-\
                                halfmax_magnitude)**2) + last_min_before_max
+#             halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
+#                                            bounds=[hm-1, hm+1]).x
+            hm0 = hm
+            for j in range(n_iterations):
+                hm1 = custom_newton_lsq(hm0, halfmax_magnitude, bounds=[hm-1, hm+1])
+                if (hm1 - hm0)**2 < eps**2:
+                    break
+                hm0 = hm1
+            halfmax = hm1
         except Exception as e:
+#             print(e)
             beta = np.nan*np.ones(4)
-            return beta            
+            return beta, spl
         if plot:
             ax1.plot(halfmax, spl(halfmax), "gx")
     except Exception as e:
@@ -328,9 +393,17 @@ def spline_fit_single_trace(trace, s, knots, plot=False):
         print(global_max)
         raise e
     beta = np.array([global_max, halfmax, global_max_val/min_val,res])
+    return beta, spl
     
-    return beta
-    
+def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
+    knots = np.linspace(0, img.shape[0]-1, num=n_knots)[1:-1]
+    q = np.apply_along_axis(lambda tr: spline_fit_single_trace(tr, s, knots), 0, img)
+    beta = np.moveaxis(np.array(list(q[0].ravel())).reshape((img.shape[1], img.shape[2],-1)), 2, 0)
+    x = np.arange(img.shape[0]*upsample_rate)/upsample_rate
+    smoothed_vid = np.array([spl(x) for spl in q[1].ravel()])
+    smoothed_vid = np.moveaxis(smoothed_vid.reshape((img.shape[1], img.shape[2],-1)), 2, 0)
+    return beta, smoothed_vid
+
 def correct_photobleach(img, mask=None, method="localmin", nsamps=51):
     """ Perform photobleach correction on each pixel in an image
     """
@@ -346,6 +419,19 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51):
         _, pbleach = traces.correct_photobleach(mean_trace, method=method, nsamps=nsamps)
         corrected_img = np.divide(img, pbleach[:,np.newaxis,np.newaxis])
         print(corrected_img.shape)
+    elif method == "monoexp":
+        mean_trace = image_to_trace(axis=(1,2))
+        tpoints = np.arange(len(mean_trace))
+        def expon(x,a,k, c):
+            y = a*np.exp(x*k) + c
+            return(y)
+        popt, _ = optimize.curve_fit(expon, tpoints, mean_trace, p0=(np.max(mean_trace)-np.min(mean_trace),\
+                                                                     -1, np.min(mean_trace)))
+        fig1, ax1 = plt.subplots(figsize=(6,6))
+        ax1.scatter(tpoints,mean_trace)
+        ax1.plot(tpoints, popt[0]*np.exp(popt[1]*tpoints) + popt[2], color="red")
+        
+        corrected_img = (img-popt[2])/np.exp(tpoints*popt[1])[:,np.newaxis,np.newaxis] + popt[2]
     else:
         raise ValueError("Not Implemented")
         
@@ -367,17 +453,33 @@ def filter_and_downsample(img, filter_function, sampling_factor=2):
     filtered_img = filtered_img[np.arange(filtered_img.shape[0], step=sampling_factor),:,:]
     return filtered_img
 
-def spike_triggered_average_video(img, spike_ends, offset=1, first_spike_index=0, last_spike_index=0, fs=1, sta_length=300):
+def get_spike_videos(img, peak_indices, before, after, normalize_height=True):
+    """ Generate spike-triggered videos of a defined length from a long video and peak indices
+
+    """
+    spike_imgs = np.ones((len(peak_indices), before+after, img.shape[1], img.shape[2]))*np.nan
+    for pk_idx, pk in enumerate(peak_indices):
+        before_pad_length = max(before - pk, 0)
+        after_pad_length = max(0, pk+after - img.shape[0])
+        spike_img = np.concatenate([np.ones((before_pad_length,img.shape[1],img.shape[2]))*np.nan,
+                                                img[max(0, pk-before):min(img.shape[0],pk+after),:,:],
+                                        np.ones((after_pad_length,img.shape[1],img.shape[2]))*np.nan])
+        if normalize_height:
+            spike_img /= np.nanmax(spike_img)
+        spike_imgs[pk_idx,:,:,:] = spike_img
+    return spike_imgs
+
+def spike_triggered_average_video(img, peak_indices, before, after, include_mask=None, normalize_height=False, full_output=False):
     """ Create a spike-triggered average video
     """
-    spike_triggered_images = []
-    for edge in spike_ends[first_spike_index:last_spike_index]:
-        if edge+offset+sta_length > img.shape[0]:
-            break
-        spike_triggered_images.append(img[edge+offset:edge+offset+sta_length,:,:])
-    spike_triggered_images = np.array(spike_triggered_images)
-    sta = np.mean(spike_triggered_images, axis=0)
-    return sta
+    if include_mask is None:
+        include_mask = np.ones_like(peak_indices, dtype=bool)
+    spike_triggered_images = get_spike_videos(img,peak_indices[include_mask], before, after, normalize_height=normalize_height)
+    sta = np.nanmean(spike_triggered_images, axis=0)
+    if full_output:
+        return sta, spike_triggered_images
+    else:
+        return sta
 
 def test_isochron_detection(vid, x, y, savgol_window=25, figsize=(8,3)):
     """ Check detection of half-maximum in spike_triggered averages
@@ -855,3 +957,114 @@ def segment_widefield_series(filepaths, expected_embryos, downsample_factor=1, r
         
     vid = np.array(frames)
     return vid, np.flip(exclude_from_write)
+
+def link_frames(curr_labels, prev_labels, prev_coms, radius=15):
+    curr_mask = curr_labels > 0
+    all_curr_labels = np.arange(1,np.max(curr_labels)+1)
+    curr_coms = ndi.center_of_mass(curr_mask, labels=curr_labels, index=all_curr_labels)
+    curr_coms = np.array(curr_coms)
+    if len(curr_coms.shape) == 2:
+        curr_coms = curr_coms[:,0] + 1j*curr_coms[:,1]
+        pairwise_dist = np.abs(np.subtract.outer(curr_coms, prev_coms))
+
+        mindist_indices = np.argmin(pairwise_dist, axis=1)
+
+        mindist = pairwise_dist[np.arange(curr_coms.shape[0]), mindist_indices]
+
+        link_curr = np.argwhere(mindist < radius).ravel()
+
+        link_prev = set(mindist_indices[link_curr]+1)
+
+        link_curr = set(link_curr+1)
+    elif len(curr_coms.shape) ==1:
+        link_curr = set([])
+        link_prev = set([])
+    all_curr_labels = set(all_curr_labels)
+    all_prev_labels = set(np.arange(1,prev_coms.shape[0]+1))
+
+    new_labels = np.zeros_like(curr_labels)
+    
+    for label in link_curr:
+        new_labels[curr_labels == label] = mindist_indices[label-1]+1
+    
+    unassigned_prev_labels = all_prev_labels - link_prev
+    for label in unassigned_prev_labels:
+        new_labels[prev_labels == label] = label
+    
+    unassigned_curr_labels = all_curr_labels - link_curr
+    new_rois_counter = 0
+    starting_idx = prev_coms.shape[0]+1
+    for label in unassigned_curr_labels:
+        if np.all(new_labels[curr_labels==label]==0):
+            new_labels[curr_labels == label] = starting_idx + new_rois_counter
+            new_rois_counter += 1
+    new_mask = new_labels > 0
+    new_coms =  ndi.center_of_mass(new_mask, labels=new_labels, index=np.arange(1,np.max(new_labels)+1))
+    new_coms = np.array(new_coms)
+    new_coms = new_coms[:,0] + 1j*new_coms[:,1]
+    return new_labels, new_coms
+    
+    
+
+def link_stack(stack, step=-1, radius=15):
+    if step <0:
+        curr_t = 1
+    else:
+        curr_t = stack.shape[0]-1
+    
+    prev_labels = stack[curr_t+step]
+    prev_mask = prev_labels > 0
+    
+    prev_coms = ndi.center_of_mass(prev_mask, labels=prev_labels, index=np.arange(1,np.max(prev_labels)+1))
+    prev_coms = np.array(prev_coms)
+    prev_coms = prev_coms[:,0] + 1j*prev_coms[:,1]
+    new_labels = [prev_labels]
+    while curr_t >=0 and curr_t < stack.shape[0]:
+        curr_labels = stack[curr_t]
+        curr_labels, curr_coms = link_frames(curr_labels, prev_labels, prev_coms, radius=radius)
+        prev_labels = curr_labels
+        prev_coms = curr_coms
+        curr_t -= step
+        new_labels.append(curr_labels)
+    new_labels = np.array(new_labels)
+    return new_labels
+
+def filter_by_appearances(linked_vid, unlinked_vid, threshold=1/3):
+    roi_found = []
+    for roi in np.arange(1, np.max(linked_vid)+1):
+        roi_linked = linked_vid==roi
+        found_in_unlinked = []
+        for i in range(roi_linked.shape[0]):
+            detected = unlinked_vid[i][roi_linked[i]]
+            found_in_unlinked.append(np.any(detected>0)*(len(detected) > 0))
+        roi_found.append(found_in_unlinked)
+    roi_found = np.array(roi_found)
+    keep = np.argwhere(np.sum(roi_found, axis=1)> threshold*linked_vid.shape[0]).ravel()+1
+    
+    filtered_vid = np.zeros_like(linked_vid)
+    for idx, roi in enumerate(keep):
+        filtered_vid[linked_vid==roi] = idx+1
+    
+    return filtered_vid
+
+def closest_non_zero(arr):
+    nonzeros = np.argwhere(arr!=0)
+#     print(nonzeros)
+#     print(nonzeros.shape)
+    distances = np.abs(np.subtract.outer(np.arange(len(arr), dtype=int), nonzeros)).reshape((len(arr), -1))
+#     print(distances.shape)
+    min_indices = np.argmin(distances, axis=1)
+    return nonzeros[min_indices]
+
+def fill_missing(vid, threshold=100):
+    roi_sizes = []
+    for roi in range(1, np.max(vid)+1):
+        roi_sizes.append(np.sum(vid==roi, axis=(1,2)))
+    roi_sizes = np.array(roi_sizes)
+    below_threshold = roi_sizes < threshold
+    closest_above_threshold = np.apply_along_axis(closest_non_zero, 1, ~below_threshold).squeeze()
+    filled_vid = np.zeros_like(vid)
+    for i in range(1, closest_above_threshold.shape[0]+1):
+        replaced_vals = vid[closest_above_threshold[i-1],:,:] == i
+        filled_vid[replaced_vals] = i
+    return filled_vid

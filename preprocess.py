@@ -38,7 +38,7 @@ print(trimmed.shape)
 sigma = scale_factor
 if scale_factor > 1:
     os.makedirs(os.path.join(output_folder, "downsampled"), exist_ok=True)
-    smoothed = ndimage.gaussian_filter(trimmed, [1,sigma,sigma])
+    smoothed = ndimage.gaussian_filter(trimmed, [0,sigma,sigma])
     print(smoothed.shape)
     downsampled = smoothed[:,np.arange(smoothed.shape[1], step=sigma, dtype=int),:]
     print(downsampled.shape)

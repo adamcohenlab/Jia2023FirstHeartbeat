@@ -21,6 +21,8 @@ parser.add_argument("--dilation_size", default=5, type=int)
 parser.add_argument("--intensity_threshold", default=0.5, type=float)
 parser.add_argument("--band_threshold", default=0.45, type=float)
 parser.add_argument("--corr_threshold", default=0.9, type=float)
+parser.add_argument("--band_min", default = 0.1, type=float)
+parser.add_argument("--band_max", default = 2, type=float)
 
 def link_frames(curr_labels, prev_labels, prev_coms, radius=15):
     curr_mask = curr_labels > 0
@@ -149,23 +151,25 @@ pathnames = [os.path.join(args.data_folder, "%s.tif" % f) for f in filenames]
 vid, exclude_from_write = images.segment_widefield_series(pathnames, args.n_embryos, downsample_factor=1, \
                                       remove_from_start=args.time_remove_from_start, \
                                       remove_from_end=args.time_remove_from_end, \
-                                      f_s=args.f_s, band_bounds=(0.1,2), opening_size=args.opening_size,\
+                                      f_s=args.f_s, band_bounds=(args.band_min,args.band_max), opening_size=args.opening_size,\
                                      dilation_size=args.dilation_size, band_threshold=args.band_threshold,\
                                       intensity_threshold=args.intensity_threshold, corr_threshold=args.corr_threshold)
+os.makedirs(os.path.join(args.data_folder, "analysis"), exist_ok=True)
 skio.imsave(os.path.join(args.data_folder, "analysis", "unlinked_segmentation_video.tif"), vid)
 linked_vid = link_stack(vid)
 
-filtered_vid = filter_by_appearances(linked_vid, vid)
+filtered_vid = filter_by_appearances(linked_vid, vid, threshold = 0.15)
 filled_vid = fill_missing(filtered_vid)
 forward_time_vid = np.flip(filled_vid, axis=0)
 
-# os.makedirs(os.path.join(args.data_folder, "analysis", "automasks"), exist_ok=True)
+
 skio.imsave(os.path.join(args.data_folder, "analysis", "segmentation_video.tif"), forward_time_vid)
 filenames = np.array(filenames, dtype=object)
 filenames = filenames[~exclude_from_write]
 with open(os.path.join(args.data_folder, "analysis", "usable_files.pickle"), "wb") as f:
     pickle.dump(filenames, f)
 
+os.makedirs(os.path.join(args.data_folder, "analysis", "automasks"), exist_ok=True)
 for i in range(forward_time_vid.shape[0]):
     f = filenames[i]
     skio.imsave(os.path.join(args.data_folder, "analysis", "automasks/%s_mask.tif" % f), forward_time_vid[i,:,:])

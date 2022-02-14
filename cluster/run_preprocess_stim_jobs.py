@@ -5,9 +5,11 @@ import shutil
 import re
 import numpy as np
 import pandas as pd
+from datetime import datetime
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootpath", type=str)
+parser.add_argument("expected_stims", type=int)
 parser.add_argument("--output_dir", default=None)
 parser.add_argument("--scale_factor", type=int, default=2)
 parser.add_argument("--remove_from_start", type=int, default=0)
@@ -16,6 +18,8 @@ parser.add_argument("--zsc_threshold", type=float, default=2)
 parser.add_argument("--upper", type=int, default=0)
 parser.add_argument("--fs", default=10.2, type=float)
 parser.add_argument("--start_from_downsampled", default=0, type=int)
+parser.add_argument("--expected_stim_width", default=3, type=int)
+parser.add_argument("--fallback_mask_path", default="0")
 args = parser.parse_args()
 
 rootpath = args.rootpath
@@ -32,7 +36,7 @@ expt_info["offset"] = offsets
 
 expt_tags = []
 for fn in expt_info["file_name"]:
-    if "stim" in fn:
+    if "pg" in fn:
         expt_tags.append("stim")
     elif "recovery" in fn:
         expt_tags.append("recovery")
@@ -45,9 +49,9 @@ expt_info = expt_info.set_index("tag")
 del expt_info["index"]
 
 for f in expt_info.loc["stim"]["file_name"]:
-    sh_line = ["sbatch", "SpikeCounter/cluster/preprocess.sh", os.path.join(rootpath, f), output_dir, str(args.remove_from_start),\
+    sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_widefield_stim.sh", os.path.join(rootpath, "%s.tif" % f), str(args.expected_stims), output_dir, str(args.remove_from_start),\
               str(args.remove_from_end), str(args.scale_factor),\
               str(args.zsc_threshold), str(args.upper), str(args.fs),\
-              str(args.start_from_downsampled)]
+              str(args.start_from_downsampled), str(args.expected_stim_width), args.fallback_mask_path]
     print(sh_line)
     subprocess.run(sh_line)

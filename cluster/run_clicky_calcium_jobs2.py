@@ -17,6 +17,7 @@ expt_info = pd.read_csv(os.path.join(rootpath,"analysis","experiment_data.csv"))
 
 
 for f in expt_info["file_name"]:
-    sh_line = ["sbatch", "SpikeCounter/cluster/clicky_calcium.sh", os.path.join(rootpath, "%s.tif" % f), os.path.join(rootpath, "analysis/automasks/%s_mask.tif" % f), os.path.join(rootpath, output_dir)]
-    print(sh_line)
-    subprocess.run(sh_line)
+    if os.path.exists(os.path.join(rootpath, "analysis/automasks/%s_mask.tif" % f)):
+        sh_line = ["sbatch", "SpikeCounter/cluster/clicky_calcium.sh", os.path.join(rootpath, "%s.tif" % f), os.path.join(rootpath, "analysis/automasks/%s_mask.tif" % f), os.path.join(rootpath, output_dir)]
+        print(sh_line)
+        subprocess.run(sh_line)

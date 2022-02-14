@@ -113,6 +113,8 @@ def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_p
         t = np.percentile(trace,95)*auto_thresh_scale
     else:
         t = threshold
+        
+    print(p, t)
     
     peaks, properties = signal.find_peaks(trace, prominence=p, height=0, wlen=wlen)
     prominences = np.array(properties["prominences"])
@@ -210,16 +212,9 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", freq_cutoff=0.1, 
     if mode == "remove":
         crosstalk_removed = trace[~mask]
     elif mode == "interpolate":
-        xs = np.arange(len(trace))[~mask]
-        ys = trace[~mask]
-        interp_f = interpolate.interp1d(xs, ys, kind="cubic", fill_value="extrapolate")
-        missing_xs = np.argwhere(mask).ravel()
-        missing_ys = interp_f(missing_xs)
-        crosstalk_removed = np.copy(trace)
-        crosstalk_removed[mask] = missing_ys
+        crosstalk_removed = interpolate_indices(trace, mask)
     else:
         raise ValueError("Invalid value for parameter mode")
-    
     if plot:
         ts = np.arange(len(trace))/fs
         _, ax1 = plt.subplots(figsize=(10,4))
@@ -227,6 +222,16 @@ def remove_stim_crosstalk(trace, method="zscore", side="both", freq_cutoff=0.1, 
         ax1.plot(ts[mask], trace[mask], "rx")
         
     return crosstalk_removed, mask
+
+def interpolate_indices(trace, mask):
+    xs = np.arange(len(trace))[~mask]
+    ys = trace[~mask]
+    interp_f = interpolate.interp1d(xs, ys, kind="cubic", fill_value="extrapolate")
+    missing_xs = np.argwhere(mask).ravel()
+    missing_ys = interp_f(missing_xs)
+    interpolated = np.copy(trace)
+    interpolated[mask] = missing_ys
+    return interpolated
 
 def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
     """ Generate spike-triggered traces of a defined length from a long trace and peak indices
@@ -256,7 +261,7 @@ def align_fixed_offset(traces, offsets):
     return aligned_traces
 
 
-def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True):
+def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, return_std=False):
     """ Generate spike-triggered average from given reference indices (peaks or stimuli)
 
     """
@@ -266,7 +271,39 @@ def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True):
         sta = np.nan*np.ones(before+after)
     else:
         sta = np.nanmean(spike_traces, axis=0)
+    if return_std:
+        ststd = np.nanstd(spike_traces, axis=0)
+        return sta, ststd
     return sta
+
+def get_spike_traces_timed(trace, sample_times, peak_indices, before_t, after_t, normalize_height=True, f_s=1):
+    """ Generate individual spike traces with given sample times to account for missing data
+    """
+    before = int(before_t*f_s)
+    after = int(after_t*f_s)
+    spike_traces = np.ones((len(peak_indices), before+after))*np.nan
+    for pk_idx, pk in enumerate(peak_indices):
+        before_idx = np.argwhere(sample_times >= sample_times[pk] - before_t).ravel()[0]
+        after_idx = np.argwhere(sample_times >= sample_times[pk] + after_t).ravel()[0]
+        
+        if before_idx > pk - before:
+            corrected_before = pk - before_idx - 1
+        else:
+            corrected_before = before
+        if after_idx < pk + after:
+            corrected_after = after_idx - pk
+        else:
+            corrected_after = after
+        
+        before_pad_length = max(corrected_before - pk, 0)
+        after_pad_length = max(0, pk+corrected_after - len(trace))
+        spike_trace = np.concatenate([np.ones(before_pad_length)*np.nan,
+                                                trace[max(0, pk-corrected):min(len(trace),pk+corrected)],
+                                        np.ones(after_pad_length)*np.nan])
+        if normalize_height:
+            spike_trace /= np.nanmax(spike_trace)
+        spike_traces[pk_idx,:] = spike_trace
+    return spike_traces
 
 def spike_match_to_kernel(kernel, trace, peak_indices, normalize_height=True, full_output=False):
     """ Compare consecutive spikes in a trace to a known kernel
@@ -309,28 +346,39 @@ def masked_peak_statistics(df, mask, f_s=1, min_peaks=6, sta_stats=False, trace=
     """ Generate statistics on a set of detected peaks after masking (e.g. subsetting or throwing out bad data)
 
     """
-    if len(mask) != df.shape[0]:
-        raise Exception("Mask must be same length as number of peaks")
-    
-    masked_df = df.loc[mask]
-    
-    mean_prom = np.mean(masked_df["prominence"])
-    std_prom = np.std(masked_df["prominence"])
-    mean_width = np.mean(masked_df["fwhm"])
-    try:
-        pct95_dff = np.percentile(masked_df["prominence"], 95)
-        pct5_dff = np.percentile(masked_df["prominence"], 5)
-        max_dff = np.max(masked_df["prominence"])
-        min_dff = np.min(masked_df["prominence"])
-    except Exception:
+    if len(df.shape) == 1:
+        mean_prom = np.nan
+        std_prom = np.nan
+        mean_width = np.nan
         pct95_dff = np.nan
         pct5_dff = np.nan
         max_dff = np.nan
         min_dff = np.nan
-    
-    locs = np.array(masked_df["peak_idx"])
-    n_peaks = len(locs)
-    mean_isi = np.mean(masked_df["isi"])
+        mean_isi = np.nan
+        n_peaks = np.nan
+    else:
+        if len(mask) != df.shape[0]:
+            raise Exception("Mask (%d) must be same length as number of peaks (%d)" % (len(mask), df.shape[0]))
+
+        masked_df = df.loc[mask]
+
+        mean_prom = np.mean(masked_df["prominence"])
+        std_prom = np.std(masked_df["prominence"])
+        mean_width = np.mean(masked_df["fwhm"])
+        try:
+            pct95_dff = np.percentile(masked_df["prominence"], 95)
+            pct5_dff = np.percentile(masked_df["prominence"], 5)
+            max_dff = np.max(masked_df["prominence"])
+            min_dff = np.min(masked_df["prominence"])
+        except Exception:
+            pct95_dff = np.nan
+            pct5_dff = np.nan
+            max_dff = np.nan
+            min_dff = np.nan
+
+        locs = np.array(masked_df["peak_idx"])
+        n_peaks = len(locs)
+        mean_isi = np.mean(masked_df["isi"])
     
     if np.sum(mask) < min_peaks:
         std_isi = np.nan
@@ -392,11 +440,14 @@ class TimelapseArrayExperiment():
     """ Loads and access trace data generated by firefly timelapses and passed through spikecounter pipelines
 
     """
-    def __init__(self, data_folder, start_hpf, f_s):
+    def __init__(self, data_folder, start_hpf, f_s, block_metadata=None):
         self.data_folder = data_folder
         self.start_hpf = start_hpf
         self.f_s = f_s
-        self.block_metadata = self._load_block_metadata(self.data_folder, self.start_hpf)
+        if block_metadata is None:
+            self.block_metadata = self._load_block_metadata(self.data_folder, self.start_hpf)
+        else:
+            self.block_metadata = self._load_block_metadata(block_metadata, self.start_hpf)
         self.data_loaded = False
         self.peaks_found = False
         self.t = None
@@ -440,8 +491,8 @@ class TimelapseArrayExperiment():
 
         for idx in timepoints:
             # Load csv file
-            exptname = self.block_metadata["file_name"].loc[idx]
-            offset = self.block_metadata["offset"].loc[idx]
+            exptname = self.block_metadata.loc[idx]["file_name"]
+            offset = self.block_metadata.loc[idx]["offset"]
             data = pd.read_csv(os.path.join(self.data_folder, "%s_traces.csv" % exptname)).set_index("z").loc[0].set_index("region")
             
             # Get number of timepoints
@@ -554,12 +605,16 @@ class TimelapseArrayExperiment():
         idx = np.argwhere(timepoint < time_array).ravel()[0] - 1
         return self.block_metadata["file_name"].iloc[idx]
 
-    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5):
+    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5, prefilter=None):
         """ Apply scipy detect_peaks on all ROIs and 
         """
         dfs = []
         for roi in range(self.n_rois):
             try:
+                if prefilter is None:
+                    trace = self.dFF[roi,:]
+                else:
+                    trace = prefilter(self.dFF[roi,:])
                 df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold, f_s=self.f_s, auto_prom_scale=auto_prom_scale, auto_thresh_scale=auto_thresh_scale)
             except Exception as e:
                 print("ROI: %d" % roi)
@@ -603,6 +658,11 @@ class TimelapseArrayExperiment():
 
             for wi_idx, wi in enumerate(window_indices):
                 mask = (peak_indices >= wi)*(peak_indices < (wi+window))
+                try:
+                    iter(mask)
+                except TypeError:
+                    mask = np.array([mask])
+                    
                 for edge_pair in segment_edges:
                     if edge_pair[1] >= wi and edge_pair[1] < wi+window:
                         left_of_segment_edge = np.argwhere(peak_indices-edge_pair[1] < 0).ravel()
@@ -614,9 +674,16 @@ class TimelapseArrayExperiment():
                     sta_stats = True
                 else:
                     sta_stats = False
-
-                roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(peak_data, mask, f_s=self.f_s, \
-                    sta_stats=sta_stats, trace=self.dFF[roi,:], sta_before=sta_before, sta_after=sta_after, min_peaks=isi_stat_min_peaks)
+                try:
+                    roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(peak_data, mask, f_s=self.f_s, \
+                        sta_stats=sta_stats, trace=self.dFF[roi,:], sta_before=sta_before, sta_after=sta_after, min_peaks=isi_stat_min_peaks)
+                except Exception as e:
+                    print(peak_data)
+                    print(roi)
+                    print(mask)
+                    print(peak_indices)
+                    print(wi)
+                    raise e
                 
 
                 roi_spike_stats["offset"] = self.t[wi]
@@ -660,7 +727,7 @@ class TimelapseArrayExperiment():
         return fig1, ax1
     
 
-    def plot_spikes(self, rois=None, figsize=(12,4), time="s"):
+    def plot_spikes(self, rois=None, n_cols=1, figsize=(12,4), time="s"):
         """Plot spikes found using find_peaks on DF/F 
         
         """
@@ -669,8 +736,8 @@ class TimelapseArrayExperiment():
         elif isinstance(rois, int):
             rois = [rois]
         
-        n_rows = len(rois)//2+1
-        fig1, axes = plt.subplots(n_rows, 2, figsize=(figsize[0], figsize[1]*n_rows))
+        n_rows = int(np.ceil(len(rois)/n_cols))
+        fig1, axes = plt.subplots(n_rows, n_cols, figsize=(figsize[0], figsize[1]*n_rows), squeeze=False)
         axes = axes.ravel()
         t, _ = self._get_time(time)
         
@@ -702,10 +769,12 @@ class TimelapseArrayExperiment():
         for idx in range(len(rois)):
             roi = rois[idx]
             ax = axes[idx,0]
-            roi_peaks = self.peaks_data.loc[roi]
-            peak_indices = roi_peaks["peak_idx"]
-            ax.plot(t, self.dFF[roi,:])
-            ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
+            if roi in self.peaks_data.index.unique():
+                roi_peaks = self.peaks_data.loc[roi]
+                peak_indices = roi_peaks["peak_idx"]
+                if len(peak_indices) > 0:
+                    ax.plot(t, self.dFF[roi,:])
+                    ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
             ax.set_xlabel("Time (%s)" % time)
             ax.set_ylabel(r"$\Delta F/F$")
             ax.set_title("ROI %d" % roi)
@@ -925,8 +994,12 @@ class TimelapseArrayExperiment():
         """ Load metadata from CSV that satisfies a pandas dataframe with the following columns:
         start_time, file_name, condition
         """
-        
-        block_metadata = pd.read_csv(os.path.join(data_folder, "experiment_data.csv")).sort_values("start_time").reset_index()
+        if isinstance(data_folder, str):
+            block_metadata = pd.read_csv(os.path.join(data_folder, "experiment_data.csv")).sort_values("start_time").reset_index()
+        elif isinstance(data_folder, pd.DataFrame):
+            block_metadata = data_folder.sort_values("start_time").reset_index()
+        else:
+            raise Exception("Invalid type for parameter data_folder")
         
         if not set(['start_time', 'file_name']).issubset(block_metadata.columns):
             raise Exception("Incorrect file format")
@@ -938,5 +1011,6 @@ class TimelapseArrayExperiment():
         offsets = [o.seconds for o in offsets]
         block_metadata["offset"] = offsets
         block_metadata["hpf"] = start_hpf + block_metadata["offset"]/3600
-        del block_metadata["index"]
+        if "index" in block_metadata.columns:
+            del block_metadata["index"]
         return block_metadata

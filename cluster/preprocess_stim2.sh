@@ -7,5 +7,5 @@
 #SBATCH -o myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 conda init bash
-conda activate bjia
-python3 SpikeCounter/preprocess_widefield_stim_experiment.py $1 $2 --output_folder $3 --remove_from_start $4 --remove_from_end $5 --scale_factor $6 --zsc_threshold $7 --upper $8 --fs $9 --start_from_downsampled ${10} --expected_stim_width ${11} --fallback_mask_path ${12}
+conda activate bjia2
+python3 SpikeCounter/preprocess_stim_experiment2.py $1 $2 $3 --output_folder $4 --remove_from_start $5 --remove_from_end $6 --scale_factor $7 --start_from_downsampled $8 --n_pcs $9 --skewness_threshold ${10} --left_shoulder ${11} --right_shoulder ${12}

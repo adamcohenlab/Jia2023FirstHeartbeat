@@ -206,3 +206,20 @@ def convert_to_iterable(x):
     except TypeError:
         iterator = iter([x])
     return iterator
+
+def traces_to_dict(matdata):
+    rising_edges = np.argwhere(np.diff(matdata["frame_counter"])==1).ravel()
+    if isinstance(matdata["task_traces"], dict):
+        trace_types = [matdata["task_traces"]]
+    else:
+        trace_types = matdata["task_traces"]
+    for trace_type in trace_types:
+        traces = trace_type["traces"]
+        dt_dict = {}
+        if isinstance(traces["name"], str):
+            dt_dict[traces["name"]] = traces["values"][rising_edges]
+        else:
+            for i in range(len(traces["name"])):
+                dt_dict[traces["name"][i]] = traces["values"][i][rising_edges]
+    dt = np.mean(np.diff(rising_edges))/matdata["clock_rate"]
+    return dt_dict, dt

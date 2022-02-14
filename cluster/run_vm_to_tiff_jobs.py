@@ -11,7 +11,9 @@ args = parser.parse_args()
 rootpath = args.rootpath
 
 for folder in os.listdir(rootpath):
-    if os.path.isdir(os.path.join(rootpath, folder)):
-        sh_line = ["sbatch", "SpikeCounter/cluster/vm_to_tiff.sh", os.path.join(rootpath, folder), rootpath]
-        print(sh_line)
-        subprocess.run(sh_line)
+    fullpath = os.path.join(rootpath, folder)
+    if os.path.isdir(fullpath):
+        if "frames.bin" in os.listdir(fullpath) or "Sq_camera.bin" in os.listdir(fullpath):
+            sh_line = ["sbatch", "SpikeCounter/cluster/vm_to_tiff.sh", fullpath, rootpath]
+            print(sh_line)
+            subprocess.run(sh_line)

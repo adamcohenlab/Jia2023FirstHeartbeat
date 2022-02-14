@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("input_file", help="Input file")
+parser.add_argument("n_expected_stims", type=int)
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
 parser.add_argument("--scale_factor", help="Scale factor for downsampling", default=2, type=float)
 parser.add_argument("--n_pcs", help="Number of PCs to keep", default=50, type=int)
@@ -23,6 +24,8 @@ parser.add_argument("--zsc_threshold", help="Threshold for removing blue illumin
 parser.add_argument("--fs", default=10.2, type=float)
 parser.add_argument("--start_from_downsampled", default=0, type=int)
 parser.add_argument("--upper", default=0, type=int)
+parser.add_argument("--expected_stim_width", default=3, type=int)
+parser.add_argument("--fallback_mask_path", default="0", type=str)
 
 args = parser.parse_args()
 input_file = args.input_file
@@ -57,7 +60,7 @@ if args.start_from_downsampled != 1:
     sigma = scale_factor
     if scale_factor > 1:
         os.makedirs(os.path.join(output_folder, "downsampled"), exist_ok=True)
-        smoothed = ndimage.gaussian_filter(trimmed, [1,sigma,sigma])
+        smoothed = ndimage.gaussian_filter(trimmed, [0,sigma,sigma])
         print(smoothed.shape)
         downsampled = smoothed[:,np.arange(smoothed.shape[1], step=sigma, dtype=int),:]
         print(downsampled.shape)
@@ -70,14 +73,19 @@ if args.start_from_downsampled != 1:
 else:
     downsampled = skio.imread(os.path.join(output_folder, "downsampled", os.path.basename(input_file)))
 
-mean_img = downsampled.mean(axis=0)
-img_mask = mean_img > np.percentile(mean_img, 97)
-img_mask = morphology.binary_closing(img_mask, selem = np.ones((8,8)))
-
-trace = images.image_to_trace(downsampled, mask=img_mask)
-# print(trace.shape)
-pb_corrected_trace, _ = traces.correct_photobleach(trace, method="localmin", nsamps=int(((fs*2)//2)*2+1))
-crosstalk_removed, t_mask = traces.remove_stim_crosstalk(pb_corrected_trace, threshold=zsc_threshold, fs=fs, side=direction, mode="interpolate", method="peak_detect",lpad=-1, rpad=0, fixed_width_remove=True, max_width=15, plot=False)
+trace = downsampled.mean(axis=(1,2))
+print(trace.shape)
+if direction == "upper":
+    pb_corrected_trace, _ = traces.correct_photobleach(trace, method="localmin", nsamps=int(((fs*2)//2)*2+1))
+else:
+    pb_corrected_trace, _ = traces.correct_photobleach(-trace, method="localmin", nsamps=int(((fs*2)//2)*2+1))
+crosstalk_removed, t_mask = traces.remove_stim_crosstalk(pb_corrected_trace, threshold=zsc_threshold, fs=fs, side=direction, mode="interpolate", method="peak_detect",lpad=-1, rpad=0, fixed_width_remove=True, expected_stim_width=args.expected_stim_width, plot=False)
+n_stims_detected = np.sum(t_mask.astype(int))
+print("n_stims_detected: ", n_stims_detected)
+if n_stims_detected < args.n_expected_stims and args.fallback_mask_path != "0":
+    print("Stims failed to be detected")
+    with open(args.fallback_mask_path, "rb") as f:
+        t_mask = pickle.load(f)
 
 os.makedirs(os.path.join(output_folder, "stim_frames_removed/trace_plots"), exist_ok=True)
 ts = np.arange(len(trace))/fs
