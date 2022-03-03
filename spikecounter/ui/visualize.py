@@ -15,7 +15,7 @@ def display_roi_overlay(img, mask, textcolor="white", alpha=0.5, ax=None, cmap="
     mask = np.ma.masked_where(mask==0, mask)
         
     im = ax.imshow(img, cmap=cmap)
-    ax.imshow(mask, interpolation='none', alpha=alpha, cmap=mask_cmap)
+    ax.imshow(mask, interpolation='none', alpha=alpha, cmap=mask_cmap, vmin=1, vmax = np.max(mask))
     if textcolor is not None:
         for idx, obj in enumerate(props):
             centroid = obj.centroid
@@ -70,13 +70,55 @@ def plot_scalebars(ax, scalebar_params, pct_f=False):
     ax.add_patch(r1)
     ax.add_patch(r2)
     
-def stackplot(y, xvals=None, figsize_single=(12,1), ax=None):
-    offset = np.max(np.max(y, axis=1) - np.min(y, axis=1))
+def stackplot(y, xvals=None, figsize_single=(12,1), ax=None, offset=None, cmap=None, flipud=False):
+    if offset is None:
+        offset = np.max(np.max(y, axis=1) - np.min(y, axis=1))
     if ax is None:
         fig1, ax = plt.subplots(figsize=(figsize_single[0],figsize_single[1]*y.shape[0]))
+    else:
+        fig1 = ax.figure
+    if cmap is None:
+        cmap = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    elif isinstance(cmap, mpl.colors.Colormap):
+        cmap = [cmap(i/y.shape[0]) for i in range(y.shape[0])]
+    cs = []
+    yplot = y
+    if flipud:
+        yplot = np.flipud(y)
+        cmap = np.flip(cmap)
     for i in range(y.shape[0]):
+        color = cmap[i%len(cmap)]
         if xvals is None:
-            ax.plot(y[i,:] + i*offset)
+            ax.plot(yplot[i,:] + i*offset, color=color)
         else:
-            ax.plot(xvals, y[i,:] + i*offset)
-    return fig1, ax
+            ax.plot(xvals, yplot[i,:] + i*offset, color=color)
+        cs.append(color)
+    return fig1, ax, cs
+
+def plot_img_scalebar(fig, ax, x0, y0, length_um, thickness_px, pix_per_um = 1, fontsize=9, \
+                  color="white", unit="\mu m", yax_direction="down", text_pos="below", scale=0.7,
+                 show_label=True):
+    rect = patches.Rectangle((x0,y0), length_um*pix_per_um, thickness_px, color=color)
+    ax.add_patch(rect)
+    
+    if show_label:
+        plt.draw()
+        label = r"$%d \mathrm{%s}$" % (length_um, unit)
+        tx = ax.text(x0, y0, label, fontsize=fontsize, color=color)
+        bb = tx.get_window_extent(renderer=fig.canvas.renderer)
+        transf = ax.transData.inverted()
+        bb_datacoords = bb.transformed(transf)
+        bb_width = bb_datacoords.x1 - bb_datacoords.x0
+        bb_height = bb_datacoords.y1 - bb_datacoords.y0
+
+        x0_text = x0 + ((length_um*pix_per_um)-bb_width)/2
+
+        if yax_direction == "down":
+            diff = bb_height*scale
+        elif yax_direction == "up":
+            diff = -bb_height*scale
+        if text_pos == "above":
+            diff = -diff
+        y0_text = y0 + diff
+        tx.set_position((x0_text, y0_text))
+        plt.draw()

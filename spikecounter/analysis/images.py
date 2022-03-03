@@ -420,18 +420,20 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51):
         corrected_img = np.divide(img, pbleach[:,np.newaxis,np.newaxis])
         print(corrected_img.shape)
     elif method == "monoexp":
-        mean_trace = image_to_trace(axis=(1,2))
+        mean_trace = image_to_trace(img, mask)
         tpoints = np.arange(len(mean_trace))
         def expon(x,a,k, c):
             y = a*np.exp(x*k) + c
             return(y)
-        popt, _ = optimize.curve_fit(expon, tpoints, mean_trace, p0=(np.max(mean_trace)-np.min(mean_trace),\
-                                                                     -1, np.min(mean_trace)))
+        guess_tc = -(np.percentile(mean_trace, 95)/np.percentile(mean_trace,5))/len(mean_trace)
+        p0 = (np.max(mean_trace)-np.min(mean_trace), guess_tc, np.min(mean_trace))
+        popt, _ = optimize.curve_fit(expon, tpoints, mean_trace, p0=p0, bounds=([0,-np.inf,0], \
+                                                                                [np.inf,0,np.inf]))
         fig1, ax1 = plt.subplots(figsize=(6,6))
         ax1.scatter(tpoints,mean_trace)
         ax1.plot(tpoints, popt[0]*np.exp(popt[1]*tpoints) + popt[2], color="red")
         
-        corrected_img = (img-popt[2])/np.exp(tpoints*popt[1])[:,np.newaxis,np.newaxis] + popt[2]
+        corrected_img = img/((popt[2]+popt[0]*np.exp(tpoints*popt[1]))[:,np.newaxis,np.newaxis]) + popt[2]
     else:
         raise ValueError("Not Implemented")
         
@@ -906,7 +908,7 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
 
     print(coms.shape)
     if full_output:
-        return new_mask_labels, coms, intensity_mask, smoothed_band_power, initial_guesses, corr_img
+        return new_mask_labels, coms, intensity_mask, abs_power, smoothed_band_power, initial_guesses, corr_img
     else:
         return new_mask_labels, coms
 

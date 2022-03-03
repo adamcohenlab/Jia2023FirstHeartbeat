@@ -102,14 +102,17 @@ t_zeroed = pb_corrected_img - mean_img
 data_matrix = t_zeroed.reshape((t_zeroed.shape[0], -1))
 
 # bandpass to get rid of BU noise
-if args.right_shoulder == -1:
-    sos = signal.butter(5,[args.left_shoulder], output="sos", fs=fs)
+if args.left_shoulder < fs/2:
+    if args.right_shoulder == -1:
+        sos = signal.butter(5,[args.left_shoulder], output="sos", fs=fs)
+    else:
+        sos = signal.butter(5,[args.left_shoulder,args.right_shoulder], btype="bandstop", output="sos", fs=fs)
+    data_matrix_filtered = np.apply_along_axis(lambda x: signal.sosfiltfilt(sos, x), 0, data_matrix)
 else:
-    sos = signal.butter(5,[args.left_shoulder,args.right_shoulder], btype="bandstop", output="sos", fs=fs)
-data_matrix_bandstop = np.apply_along_axis(lambda x: signal.sosfiltfilt(sos, x), 0, data_matrix)
+    data_matrix_filtered = data_matrix
 
 # SVD
-u, s, v = randomized_svd(data_matrix_bandstop, n_components=60)
+u, s, v = randomized_svd(data_matrix_filtered, n_components=60)
 
 use_pcs = np.zeros_like(s,dtype=bool)
 use_pcs[:n_pcs] = True
@@ -123,4 +126,4 @@ denoised = denoised.reshape(pb_corrected_img.shape)
 
 # Add back DC offset for the purposes of comparing noise to mean intensity
 denoised += mean_img
-skio.imsave(os.path.join(output_folder, "denoised", "%s.tif" % expt_name), denoised)
+skio.imsave(os.path.join(output_folder, "denoised", "%s.tif" % expt_name), denoised.astype(np.float32))
