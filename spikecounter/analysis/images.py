@@ -1,12 +1,13 @@
 import numpy as np
 import scipy.ndimage as ndi
 import skimage.io as skio
-from scipy import signal, stats, interpolate, optimize
+from scipy import signal, stats, interpolate, optimize, ndimage
 import matplotlib.pyplot as plt
 from skimage import transform, filters, morphology, measure
 from scipy.fft import fft, fftfreq
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.extmath import randomized_svd
 import os
 import mat73
 import warnings
@@ -16,28 +17,45 @@ from . import traces
 from .. import utils
 from ..ui import visualize
 
-def load_image(rootdir, expt_name, subfolder=""):
+def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold=0):
+    u, s, v = randomized_svd(data_matrix, n_components=n_initial_components)
+
+    use_pcs = np.zeros_like(s,dtype=bool)
+    use_pcs[:n_pcs] = True
+    
+    skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
+    use_pcs = use_pcs & (skw > skewness_threshold)
+    
+    denoised = u[:,use_pcs]@ np.diag(s[use_pcs]) @ v[use_pcs,:]
+    return denoised
+
+def load_image(rootdir, expt_name, subfolder="", raw=False):
     d = os.path.join(rootdir, subfolder)
     
     all_files = os.listdir(d)
     expt_files = 0
-    for f in all_files:
-        if expt_name in f and ".tif" in f:
-            expt_files +=1
-    if expt_files == 1:
-        img = skio.imread(os.path.join(d, "%s.tif" % expt_name))
-    else:
-        img = [skio.imread(os.path.join(d, "%s_block%d.tif" % (expt_name, block+1))) for block in range(expt_files)]
-        img = np.concatenate(img, axis=0)
-    
     expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
+
+    if raw:
+        width = int(expt_data["camera"]["roi"][1])
+        height = int(expt_data["camera"]["roi"][3])
+        img = np.fromfile(os.path.join(rootdir, expt_name, "frames.bin"), dtype=np.dtype("<u2")).reshape((-1,width,height))
+    else:
+        for f in all_files:
+            if expt_name in f and ".tif" in f:
+                expt_files +=1
+        if expt_files == 1:
+            img = skio.imread(os.path.join(d, "%s.tif" % expt_name))
+        else:
+            img = [skio.imread(os.path.join(d, "%s_block%d.tif" % (expt_name, block+1))) for block in range(expt_files)]
+            img = np.concatenate(img, axis=0)
     
     fc_max = np.max(expt_data["frame_counter"])
     if fc_max > img.shape[0]:
         warnings.warn("%d frames dropped" % (fc_max - img.shape[0]))
         last_tidx = img.shape[0]
     else:
-        last_tidx = fc_max
+        last_tidx = int(min(fc_max, expt_data["camera"]["frames_requested"] - expt_data["camera"]["dropped_frames"]))
     
     return img[:last_tidx,:,:], expt_data
     
@@ -161,6 +179,13 @@ def spike_mask_to_stim_index(spike_mask, pos="start"):
     elif pos == "end":
         stims = np.argwhere(diff_mask==-1).ravel()+1
     return stims
+
+def image_to_roi_traces(img, label_mask):
+    """ Get traces from image using defined roi mask
+    """
+    labels = np.arange(np.max(label_mask))+1
+    traces = [image_to_trace(img, label_mask==l) for l in labels]
+    return np.array(traces)
 
 def image_to_trace(img, mask = None):
     """ Convert part of an image to a trace according to a mask
@@ -545,16 +570,21 @@ def analyze_wave_prop(masked_image, mask, nbins=16, savgol_window=5, dt=1):
 def fill_nans_with_neighbors(img):
     isnan = np.isnan(img)
 
-def downsample_video(raw_img, downsample_factor, aa=True):
+def downsample_video(raw_img, downsample_factor, aa="gaussian"):
     """ Downsample video in space with optional anti-aliasing
     """
     if downsample_factor == 1:
         di = raw_img
     else:
-        if aa:
+        if aa == "butter":
             sos = signal.butter(4, 1/downsample_factor, output='sos')
-            filtered = np.apply_over_axes(lambda a, axis: np.apply_along_axis(lambda x: signal.sosfiltfilt(sos, x), axis, a), raw_img, [1,2])
-            di = transform.downscale_local_mean(filtered, (1,downsample_factor,downsample_factor))
+            smoothed = np.apply_over_axes(lambda a, axis: np.apply_along_axis(lambda x: signal.sosfiltfilt(sos, x), axis, a), raw_img, [1,2])
+            di = smoothed[:,np.arange(smoothed.shape[1], step=downsample_factor, dtype=int),:]
+            di = di[:,:,np.arange(smoothed.shape[2], step=downsample_factor, dtype=int)]            
+        elif aa == "gaussian":
+            smoothed = ndimage.gaussian_filter(raw_img, [0,downsample_factor,downsample_factor])
+            di = smoothed[:,np.arange(smoothed.shape[1], step=downsample_factor, dtype=int),:]
+            di = di[:,:,np.arange(smoothed.shape[2], step=downsample_factor, dtype=int)]
         else:
             di = transform.downscale_local_mean(raw_img, (1,downsample_factor,downsample_factor))
     return di

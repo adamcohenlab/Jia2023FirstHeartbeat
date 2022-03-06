@@ -29,9 +29,12 @@ parser.add_argument("--skewness_threshold", default=2, type=float)
 parser.add_argument("--left_shoulder", default=16,type=float)
 parser.add_argument("--right_shoulder", default=19, type=float)
 
-def generate_invalid_frame_indices(stim_trace):
+def generate_invalid_frame_indices(stim_trace, dt_frame):
     invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
-    invalid_indices_camera = np.concatenate((invalid_indices_daq, invalid_indices_daq+1))
+    if np.sum(np.diff(invalid_indices_daq)<2) == 0:
+        invalid_indices_camera = np.unique(np.concatenate((invalid_indices_daq, invalid_indices_daq+1)))
+    else:
+        invalid_indices_camera = invalid_indices_daq
     return invalid_indices_camera
     
 
@@ -55,6 +58,7 @@ fs = 1/dt_frame
 
 os.makedirs(os.path.join(output_folder, "denoised"), exist_ok=True)
 os.makedirs(os.path.join(output_folder, "downsampled"), exist_ok=True)
+os.makedirs(os.path.join(output_folder, "stim_frames_removed"), exist_ok=True)
 os.makedirs(os.path.join(output_folder, "corrected"), exist_ok=True)
 
 
@@ -63,17 +67,9 @@ if args.start_from_downsampled != 1:
     print(img.shape)
 
     trimmed = img[remove_from_start:img.shape[0]-remove_from_end]
-
     # LP filter then downsample
-    sigma = scale_factor
     if scale_factor > 1:
-        smoothed = ndimage.gaussian_filter(trimmed, [0,sigma,sigma])
-        print(smoothed.shape)
-        downsampled = smoothed[:,np.arange(smoothed.shape[1], step=sigma, dtype=int),:]
-        print(downsampled.shape)
-        downsampled = downsampled[:,:,np.arange(downsampled.shape[2], step=sigma, dtype=int)]
-        print(downsampled.shape)
-
+        downsampled = images.downsample_video(trimmed, scale_factor)
         skio.imsave(os.path.join(output_folder, "downsampled", "%s.tif" % expt_name), np.round(downsampled).astype(np.uint16))
     else:
         downsampled = trimmed
@@ -83,15 +79,17 @@ else:
 if crosstalk_channel =="None":
     stim_frames_removed = downsampled
 else:
-    invalid_indices = generate_invalid_frame_indices(trace_dict[crosstalk_channel]) - remove_from_start
+    invalid_indices = generate_invalid_frame_indices(trace_dict[crosstalk_channel], dt_frame) - remove_from_start
     invalid_mask = np.zeros(downsampled.shape[0], dtype=bool)
+    invalid_indices = invalid_indices[invalid_indices < downsampled.shape[0]]
     invalid_mask[invalid_indices] = True
     stim_frames_removed = images.interpolate_invalid_values(downsampled, invalid_mask)
+    skio.imsave(os.path.join(output_folder, "stim_frames_removed", "%s.tif" % expt_name), stim_frames_removed)
+
 
 # Correct photobleach
 nsamps = (int(2*fs)//2)*2 +1
 pb_corrected_img = images.correct_photobleach(stim_frames_removed, mask=None, method="localmin", nsamps=nsamps)
-
 skio.imsave(os.path.join(output_folder, "corrected", "%s.tif" % expt_name), pb_corrected_img)
 
 
@@ -112,17 +110,19 @@ else:
     data_matrix_filtered = data_matrix
 
 # SVD
-u, s, v = randomized_svd(data_matrix_filtered, n_components=60)
+denoised = images.denoise_svd(data_matrix_filtered, n_pcs, skewness_threshold=args.skewness_threshold)
+denoised = denoised.reshape(downsampled.shape)
+# u, s, v = randomized_svd(data_matrix_filtered, n_components=60)
 
-use_pcs = np.zeros_like(s,dtype=bool)
-use_pcs[:n_pcs] = True
-if args.filter_skewness:
-    skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
-    use_pcs = use_pcs & (skw > args.skewness_threshold)
+# use_pcs = np.zeros_like(s,dtype=bool)
+# use_pcs[:n_pcs] = True
+# if args.filter_skewness:
+#     skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
+#     use_pcs = use_pcs & (skw > args.skewness_threshold)
     
 
-denoised = u[:,use_pcs]@ np.diag(s[use_pcs]) @ v[use_pcs,:]
-denoised = denoised.reshape(pb_corrected_img.shape)
+# denoised = u[:,use_pcs]@ np.diag(s[use_pcs]) @ v[use_pcs,:]
+# denoised = denoised.reshape(pb_corrected_img.shape)
 
 # Add back DC offset for the purposes of comparing noise to mean intensity
 denoised += mean_img

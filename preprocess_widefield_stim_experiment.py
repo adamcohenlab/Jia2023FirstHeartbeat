@@ -26,6 +26,7 @@ parser.add_argument("--start_from_downsampled", default=0, type=int)
 parser.add_argument("--upper", default=0, type=int)
 parser.add_argument("--expected_stim_width", default=3, type=int)
 parser.add_argument("--fallback_mask_path", default="0", type=str)
+parser.add_argument("--skewness_threshold", default=0, type=float)
 
 args = parser.parse_args()
 input_file = args.input_file
@@ -79,7 +80,7 @@ if direction == "upper":
     pb_corrected_trace, _ = traces.correct_photobleach(trace, method="localmin", nsamps=int(((fs*2)//2)*2+1))
 else:
     pb_corrected_trace, _ = traces.correct_photobleach(-trace, method="localmin", nsamps=int(((fs*2)//2)*2+1))
-crosstalk_removed, t_mask = traces.remove_stim_crosstalk(pb_corrected_trace, threshold=zsc_threshold, fs=fs, side=direction, mode="interpolate", method="peak_detect",lpad=-1, rpad=0, fixed_width_remove=True, expected_stim_width=args.expected_stim_width, plot=False)
+crosstalk_removed, t_mask = traces.remove_stim_crosstalk(pb_corrected_trace, threshold=zsc_threshold, fs=fs, side=direction, mode="interpolate", method="peak_detect",lpad=-1, rpad=1, fixed_width_remove=True, expected_stim_width=args.expected_stim_width, plot=False)
 n_stims_detected = np.sum(t_mask.astype(int))
 print("n_stims_detected: ", n_stims_detected)
 if n_stims_detected < args.n_expected_stims and args.fallback_mask_path != "0":
@@ -94,10 +95,13 @@ ax1.plot(ts, trace)
 ax2 = ax1.twinx()
 ax2.plot(ts, pb_corrected_trace, color="C1")
 ax1.plot(ts[t_mask], trace[t_mask], "rx")
-plt.savefig(os.path.join(output_folder, "stim_frames_removed/trace_plots", "%s_plot.svg" \
-                        % filename))
 
 stim_frames_removed = images.interpolate_invalid_values(downsampled, t_mask)
+stim_removed_trace = images.image_to_trace(stim_frames_removed)
+ax1.plot(ts, stim_removed_trace - np.nanmean(stim_removed_trace)/2, color="C2")
+
+plt.savefig(os.path.join(output_folder, "stim_frames_removed/trace_plots", "%s_plot.svg" \
+                        % filename))
 
 skio.imsave(os.path.join(output_folder, "stim_frames_removed", os.path.basename(input_file)), np.round(stim_frames_removed).astype(np.uint16))
 
@@ -113,10 +117,7 @@ mean_trace = data_matrix.mean(axis=1)
 corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
 resids = data_matrix - np.outer(mean_trace, corr)
 
-# SVD
-u, s, v = randomized_svd(resids, n_components=100)
-
-denoised = u[:,:n_pcs]@ np.diag(s[:n_pcs]) @ v[:n_pcs,:]
+denoised = images.denoise_svd(resids, n_pcs, skewness_threshold=args.skewness_threshold)
 denoised = denoised.reshape(downsampled.shape)
 
 # Add back DC offset for the purposes of comparing noise to mean intensity

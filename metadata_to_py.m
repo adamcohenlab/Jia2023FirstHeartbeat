@@ -37,6 +37,8 @@ function metadata_to_py(folder)
     dd_compat_py.camera.exposuretime = camera.exposuretime;
     dd_compat_py.camera.frames_requested = camera.frames_requested;
     dd_compat_py.camera.roi = camera.ROI;
+    dd_compat_py.camera.dropped_frames = camera.dropped_frames;
+
     
     if ~isempty(dmd_lightcrafter)
        dd_compat_py.dmd_lightcrafter = struct;
