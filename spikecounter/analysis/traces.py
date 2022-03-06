@@ -244,9 +244,9 @@ def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
         spike_trace = np.concatenate([np.ones(before_pad_length)*np.nan,
                                                 trace[max(0, pk-before):min(len(trace),pk+after)],
                                         np.ones(after_pad_length)*np.nan])
-        if normalize_height:
-            spike_trace /= np.nanmax(spike_trace)
         spike_traces[pk_idx,:] = spike_trace
+    if normalize_height:
+        spike_traces /= np.nanmax(spike_traces)
     return spike_traces
 
 def align_fixed_offset(traces, offsets):
@@ -261,7 +261,7 @@ def align_fixed_offset(traces, offsets):
     return aligned_traces
 
 
-def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, return_std=False):
+def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, return_std=False, use_median=False):
     """ Generate spike-triggered average from given reference indices (peaks or stimuli)
 
     """
@@ -270,7 +270,10 @@ def get_sta(trace, peak_indices, before, after, f_s=1, normalize_height=True, re
     if len(peak_indices) == 0:
         sta = np.nan*np.ones(before+after)
     else:
-        sta = np.nanmean(spike_traces, axis=0)
+        if use_median:
+            sta=np.nanmedian(spike_traces, axis=0)
+        else:
+            sta = np.nanmean(spike_traces, axis=0)
     if return_std:
         ststd = np.nanstd(spike_traces, axis=0)
         return sta, ststd
