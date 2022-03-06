@@ -1,16 +1,17 @@
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib import patches
 from skimage.measure import regionprops
 import numpy as np
 
-def display_roi_overlay(img, mask, textcolor="white", alpha=0.5, ax=None, cmap="gray", mask_cmap="viridis"):
+def display_roi_overlay(img, m, textcolor="white", alpha=0.5, ax=None, cmap="gray", mask_cmap="viridis"):
     """ Display an image with a labelled integer valued overlay
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 12))
     else:
         fig = ax.figure
-        
+    mask = m.astype(int)
     props = regionprops(mask)
     mask = np.ma.masked_where(mask==0, mask)
         
@@ -23,6 +24,8 @@ def display_roi_overlay(img, mask, textcolor="white", alpha=0.5, ax=None, cmap="
     return fig, ax, im
 
 def get_line_labels(lns):
+    """ Get Matplotlib artist labels for 
+    """
     return [l.get_label() for l in lns]
 
 def tile_plots_conditions(condition_list, subplot_size):

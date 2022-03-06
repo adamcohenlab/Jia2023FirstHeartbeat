@@ -20,6 +20,8 @@ parser.add_argument("--fs", default=10.2, type=float)
 parser.add_argument("--start_from_downsampled", default=0, type=int)
 parser.add_argument("--expected_stim_width", default=3, type=int)
 parser.add_argument("--fallback_mask_path", default="0")
+parser.add_argument("--skewness_threshold", default=0)
+parser.add_argument("--n_pcs", default=50)
 args = parser.parse_args()
 
 rootpath = args.rootpath
@@ -52,6 +54,7 @@ for f in expt_info.loc["stim"]["file_name"]:
     sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_widefield_stim.sh", os.path.join(rootpath, "%s.tif" % f), str(args.expected_stims), output_dir, str(args.remove_from_start),\
               str(args.remove_from_end), str(args.scale_factor),\
               str(args.zsc_threshold), str(args.upper), str(args.fs),\
-              str(args.start_from_downsampled), str(args.expected_stim_width), args.fallback_mask_path]
+              str(args.start_from_downsampled), str(args.expected_stim_width),\
+               args.fallback_mask_path, str(args.n_pcs), str(args.skewness_threshold)]
     print(sh_line)
     subprocess.run(sh_line)
