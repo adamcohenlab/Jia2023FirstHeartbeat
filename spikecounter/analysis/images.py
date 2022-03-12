@@ -1035,31 +1035,6 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15):
     new_coms = np.array(new_coms)
     new_coms = new_coms[:,0] + 1j*new_coms[:,1]
     return new_labels, new_coms
-    
-    
-
-def link_stack(stack, step=-1, radius=15):
-    if step <0:
-        curr_t = 1
-    else:
-        curr_t = stack.shape[0]-1
-    
-    prev_labels = stack[curr_t+step]
-    prev_mask = prev_labels > 0
-    
-    prev_coms = ndi.center_of_mass(prev_mask, labels=prev_labels, index=np.arange(1,np.max(prev_labels)+1))
-    prev_coms = np.array(prev_coms)
-    prev_coms = prev_coms[:,0] + 1j*prev_coms[:,1]
-    new_labels = [prev_labels]
-    while curr_t >=0 and curr_t < stack.shape[0]:
-        curr_labels = stack[curr_t]
-        curr_labels, curr_coms = link_frames(curr_labels, prev_labels, prev_coms, radius=radius)
-        prev_labels = curr_labels
-        prev_coms = curr_coms
-        curr_t -= step
-        new_labels.append(curr_labels)
-    new_labels = np.array(new_labels)
-    return new_labels
 
 def filter_by_appearances(linked_vid, unlinked_vid, threshold=1/3):
     roi_found = []
