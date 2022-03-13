@@ -990,7 +990,7 @@ def segment_widefield_series(filepaths, expected_embryos, downsample_factor=1, r
     vid = np.array(frames)
     return vid, np.flip(exclude_from_write)
 
-def link_frames(curr_labels, prev_labels, prev_coms, radius=15):
+def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_labels=True):
     curr_mask = curr_labels > 0
     all_curr_labels = np.arange(1,np.max(curr_labels)+1)
     curr_coms = ndi.center_of_mass(curr_mask, labels=curr_labels, index=all_curr_labels)
@@ -1019,9 +1019,10 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15):
     for label in link_curr:
         new_labels[curr_labels == label] = mindist_indices[label-1]+1
     
-    unassigned_prev_labels = all_prev_labels - link_prev
-    for label in unassigned_prev_labels:
-        new_labels[prev_labels == label] = label
+    if propagate_old_labels:
+        unassigned_prev_labels = all_prev_labels - link_prev
+        for label in unassigned_prev_labels:
+            new_labels[prev_labels == label] = label
     
     unassigned_curr_labels = all_curr_labels - link_curr
     new_rois_counter = 0
@@ -1038,12 +1039,12 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15):
     
     
 
-def link_stack(stack, step=-1, radius=15):
+def link_stack(stack, step=-1, radius=15, propagate_old_labels=True):
     if step <0:
         curr_t = 1
     else:
         curr_t = stack.shape[0]-1
-    
+
     prev_labels = stack[curr_t+step]
     prev_mask = prev_labels > 0
     
@@ -1053,7 +1054,8 @@ def link_stack(stack, step=-1, radius=15):
     new_labels = [prev_labels]
     while curr_t >=0 and curr_t < stack.shape[0]:
         curr_labels = stack[curr_t]
-        curr_labels, curr_coms = link_frames(curr_labels, prev_labels, prev_coms, radius=radius)
+        curr_labels, curr_coms = link_frames(curr_labels, prev_labels, prev_coms,\
+             radius=radius, propagate_old_labels=propagate_old_labels)
         prev_labels = curr_labels
         prev_coms = curr_coms
         curr_t -= step
