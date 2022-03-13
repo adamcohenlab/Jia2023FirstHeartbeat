@@ -1012,13 +1012,15 @@ def pairwise_mindist(x, y):
 
 def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_labels=True):
     curr_mask = curr_labels > 0
-    all_curr_labels = np.arange(1,np.max(curr_labels)+1)
+    all_curr_labels = np.unique(curr_labels)[1:]
+    all_prev_labels = np.unique(prev_labels)[1:]
+
     curr_coms = ndi.center_of_mass(curr_mask, labels=curr_labels, index=all_curr_labels)
     curr_coms = np.array(curr_coms)
     if len(curr_coms.shape) == 2:
         curr_coms = curr_coms[:,0] + 1j*curr_coms[:,1]
-        mindist, mindist_indices = pairwise_mindist(curr_coms, prev_coms)
 
+        mindist, mindist_indices = images.pairwise_mindist(curr_coms, prev_coms)
         link_curr = np.argwhere(mindist < radius).ravel()
 
         link_prev = set(mindist_indices[link_curr]+1)
@@ -1027,28 +1029,28 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     elif len(curr_coms.shape) ==1:
         link_curr = set([])
         link_prev = set([])
-    all_curr_labels = set(all_curr_labels)
-    all_prev_labels = set(np.arange(1,prev_coms.shape[0]+1))
+    all_curr_labels_set = set(all_curr_labels)
+    all_prev_labels_set = set(all_prev_labels)
 
     new_labels = np.zeros_like(curr_labels)
     
     for label in link_curr:
-        new_labels[curr_labels == label] = mindist_indices[label-1]+1
+        new_labels[curr_labels == label] = all_prev_labels[mindist_indices[label-1]]
     
     if propagate_old_labels:
-        unassigned_prev_labels = all_prev_labels - link_prev
+        unassigned_prev_labels = all_prev_labels_set - link_prev
         for label in unassigned_prev_labels:
             new_labels[prev_labels == label] = label
     
-    unassigned_curr_labels = all_curr_labels - link_curr
+    unassigned_curr_labels = all_curr_labels_set - link_curr
     new_rois_counter = 0
-    starting_idx = prev_coms.shape[0]+1
+    starting_idx = np.max(all_prev_labels)+1
     for label in unassigned_curr_labels:
         if np.all(new_labels[curr_labels==label]==0):
             new_labels[curr_labels == label] = starting_idx + new_rois_counter
             new_rois_counter += 1
     new_mask = new_labels > 0
-    new_coms =  ndi.center_of_mass(new_mask, labels=new_labels, index=np.arange(1,np.max(new_labels)+1))
+    new_coms =  ndi.center_of_mass(new_mask, labels=new_labels, index=np.unique(new_labels)[1:])
     new_coms = np.array(new_coms)
     new_coms = new_coms[:,0] + 1j*new_coms[:,1]
     return new_labels, new_coms
