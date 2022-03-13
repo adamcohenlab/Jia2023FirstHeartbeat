@@ -12,16 +12,18 @@ def display_roi_overlay(img, m, textcolor="white", alpha=0.5, ax=None, cmap="gra
     else:
         fig = ax.figure
     mask = m.astype(int)
-    props = regionprops(mask)
+    mask_values = np.unique(mask)
+    mask_values = mask_values[mask_values!=0]
     mask = np.ma.masked_where(mask==0, mask)
         
     im = ax.imshow(img, cmap=cmap)
-    ax.imshow(mask, interpolation='none', alpha=alpha, cmap=mask_cmap, vmin=1, vmax = np.max(mask))
+    mask_im = ax.imshow(mask, interpolation='none', alpha=alpha, cmap=mask_cmap, vmin=1, vmax = np.max(mask))
     if textcolor is not None:
+        props = regionprops(mask)
         for idx, obj in enumerate(props):
             centroid = obj.centroid
-            ax.text(centroid[1], centroid[0], str(idx+1), color=textcolor)
-    return fig, ax, im
+            ax.text(centroid[1], centroid[0], str(mask_values[idx]), color=textcolor)
+    return fig, ax, im, mask_im
 
 def get_line_labels(lns):
     """ Get Matplotlib artist labels for 
@@ -125,3 +127,23 @@ def plot_img_scalebar(fig, ax, x0, y0, length_um, thickness_px, pix_per_um = 1, 
         y0_text = y0 + diff
         tx.set_position((x0_text, y0_text))
         plt.draw()
+        
+def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4), trace_color="C1", stim_color="blue", scale="axis", scalebar_params=None, axis=None):
+    """ Plot a trace with rectangles indicating stimulation
+    """
+    if axis is None:
+        fig1, ax1 = plt.subplots(figsize=(12,4))
+    else:
+        ax1 = axis
+    ax1.plot(np.arange(len(trace))*dt, trace, color=trace_color)
+    for st in stims:
+        r = patches.Rectangle((st, start_y), width, height, color=stim_color)
+        ax1.add_patch(r)
+    
+    if scale == "axis":
+        pass
+    elif scale == "bar":
+        if scalebar_params is None:
+            raise ValueError("scalebar_params required")
+        plot_scalebars(ax1, scalebar_params)
+    return fig1, ax1

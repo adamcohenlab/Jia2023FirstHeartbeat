@@ -180,19 +180,21 @@ def transferjob(sourcedir,targetdir):
     cmd = "sbatch -p transfer -t 0-12:00 --wrap=\"" + wrapcmd + "\""
     os.system(cmd)
 
-def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5,95]):
+def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5,95], cmap=None):
     st = stack.copy()
     if len(stack.shape) < 4:
         st = st[:,:,:, np.newaxis]
     min_value = np.percentile(st[~np.isnan(st)], pct_cutoffs[0])
     max_value = np.percentile(st[~np.isnan(st)], pct_cutoffs[1])
+    if cmap is None:
+        cmap = plt.rcParams['image.cmap']
     def view_image(z, c):
         
         if c=="all":
             img = st[z,:,:,:]
         else:
             img = st[z,:,:,int(c)]
-        plt.imshow(img, interpolation="nearest", vmin=min_value, vmax=max_value)
+        plt.imshow(img, interpolation="nearest", vmin=min_value, vmax=max_value, cmap=cmap)
         if len(markers) > 0:
             for marker in markers:
                 plt.plot(marker[0], marker[1], "rx")
@@ -221,5 +223,5 @@ def traces_to_dict(matdata):
         else:
             for i in range(len(traces["name"])):
                 dt_dict[traces["name"][i]] = traces["values"][i][rising_edges]
-    dt = np.mean(np.diff(rising_edges))/matdata["clock_rate"]
-    return dt_dict, dt
+    t = rising_edges/matdata["clock_rate"]
+    return dt_dict, t

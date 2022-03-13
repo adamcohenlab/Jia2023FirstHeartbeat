@@ -29,18 +29,22 @@ def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold
     denoised = u[:,use_pcs]@ np.diag(s[use_pcs]) @ v[use_pcs,:]
     return denoised
 
-def load_image(rootdir, expt_name, subfolder="", raw=False):
+def load_image(rootdir, expt_name, subfolder="", raw=True):
     d = os.path.join(rootdir, subfolder)
     
     all_files = os.listdir(d)
     expt_files = 0
     expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
 
-    if raw:
+    if raw and subfolder == "":
         width = int(expt_data["camera"]["roi"][1])
         height = int(expt_data["camera"]["roi"][3])
-        img = np.fromfile(os.path.join(rootdir, expt_name, "frames.bin"), dtype=np.dtype("<u2")).reshape((-1,width,height))
-    else:
+        try:
+            img = np.fromfile(os.path.join(rootdir, expt_name, "frames.bin"), dtype=np.dtype("<u2")).reshape((-1,width,height))
+        except Exception:
+            raw = False
+        
+    if not raw:
         for f in all_files:
             if expt_name in f and ".tif" in f:
                 expt_files +=1
@@ -183,7 +187,8 @@ def spike_mask_to_stim_index(spike_mask, pos="start"):
 def image_to_roi_traces(img, label_mask):
     """ Get traces from image using defined roi mask
     """
-    labels = np.arange(np.max(label_mask))+1
+    labels = np.unique(label_mask)
+    labels = labels[labels != 0]
     traces = [image_to_trace(img, label_mask==l) for l in labels]
     return np.array(traces)
 
@@ -429,7 +434,7 @@ def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
     smoothed_vid = np.moveaxis(smoothed_vid.reshape((img.shape[1], img.shape[2],-1)), 2, 0)
     return beta, smoothed_vid
 
-def correct_photobleach(img, mask=None, method="localmin", nsamps=51):
+def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=False):
     """ Perform photobleach correction on each pixel in an image
     """
     if method == "linear":
@@ -440,9 +445,14 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51):
                 corrected_img[:, y,x] = corrected_trace
                 
     elif method == "localmin":
-        mean_trace = image_to_trace(img, mask)
+        if invert:
+            mean_img = img.mean(axis=0)
+            raw_img = 2*mean_img - img
+        else:
+            raw_img = img
+        mean_trace = image_to_trace(raw_img, mask)
         _, pbleach = traces.correct_photobleach(mean_trace, method=method, nsamps=nsamps)
-        corrected_img = np.divide(img, pbleach[:,np.newaxis,np.newaxis])
+        corrected_img = np.divide(raw_img, pbleach[:,np.newaxis,np.newaxis])
         print(corrected_img.shape)
     elif method == "monoexp":
         mean_trace = image_to_trace(img, mask)
@@ -990,6 +1000,16 @@ def segment_widefield_series(filepaths, expected_embryos, downsample_factor=1, r
     vid = np.array(frames)
     return vid, np.flip(exclude_from_write)
 
+def pairwise_mindist(x, y):
+    """ Calculate minimum distance between each point in the list x and each point in the list y
+    """
+    
+    pairwise_dist = np.abs(np.subtract.outer(x, y))
+    mindist_indices = np.argmin(pairwise_dist, axis=1)
+    mindist = pairwise_dist[np.arange(x.shape[0]), mindist_indices]
+    
+    return mindist, mindist_indices
+
 def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_labels=True):
     curr_mask = curr_labels > 0
     all_curr_labels = np.arange(1,np.max(curr_labels)+1)
@@ -997,11 +1017,7 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     curr_coms = np.array(curr_coms)
     if len(curr_coms.shape) == 2:
         curr_coms = curr_coms[:,0] + 1j*curr_coms[:,1]
-        pairwise_dist = np.abs(np.subtract.outer(curr_coms, prev_coms))
-
-        mindist_indices = np.argmin(pairwise_dist, axis=1)
-
-        mindist = pairwise_dist[np.arange(curr_coms.shape[0]), mindist_indices]
+        mindist, mindist_indices = pairwise_mindist(curr_coms, prev_coms)
 
         link_curr = np.argwhere(mindist < radius).ravel()
 
