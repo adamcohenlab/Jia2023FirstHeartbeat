@@ -1020,7 +1020,7 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     if len(curr_coms.shape) == 2:
         curr_coms = curr_coms[:,0] + 1j*curr_coms[:,1]
 
-        mindist, mindist_indices = images.pairwise_mindist(curr_coms, prev_coms)
+        mindist, mindist_indices = pairwise_mindist(curr_coms, prev_coms)
         link_curr = np.argwhere(mindist < radius).ravel()
 
         link_prev = set(mindist_indices[link_curr]+1)
