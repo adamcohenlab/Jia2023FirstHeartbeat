@@ -30,12 +30,15 @@ def get_line_labels(lns):
     """
     return [l.get_label() for l in lns]
 
-def tile_plots_conditions(condition_list, subplot_size):
+def tile_plots_conditions(condition_list, subplot_size, disp_titles=True):
     """ Generate subplots for the same graph over a large number of conditions
     INCOMPLETE
     """
     n_rows = int(np.ceil(np.sqrt(len(condition_list))))
     fig1, axes = plt.subplots(n_rows, n_rows, figsize=(subplot_size[0]*n_rows, subplot_size[1]*n_rows))
+    if disp_titles:
+        for idx, c in enumerate(condition_list):
+            axes.ravel()[idx].set_title(c)
     if n_rows ==1:
         axes = np.array([axes])
     axes = axes.ravel()
@@ -77,7 +80,7 @@ def plot_scalebars(ax, scalebar_params, pct_f=False):
     
 def stackplot(y, xvals=None, figsize_single=(12,1), ax=None, offset=None, cmap=None, flipud=False):
     if offset is None:
-        offset = np.max(np.max(y, axis=1) - np.min(y, axis=1))
+        offset = np.nanmax(np.nanmax(y, axis=1) - np.nanmin(y, axis=1))
     if ax is None:
         fig1, ax = plt.subplots(figsize=(figsize_single[0],figsize_single[1]*y.shape[0]))
     else:

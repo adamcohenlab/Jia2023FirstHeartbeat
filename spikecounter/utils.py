@@ -5,6 +5,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from ipywidgets import interact
 from scipy import interpolate
+import re
 
 def shiftkern(kernel, a, b, c, dt):
     """ From Hochbaum and Cohen 2012
@@ -25,6 +26,29 @@ def extract_experiment_name(input_path):
         expt_name = folder_names[-1]
     expt_name = expt_name.split(".tif")[0]
     return expt_name
+
+def process_experiment_metadata(expt_metadata, regexp_dict={}):
+    """ Extract data from filenames in basic metadata DF
+    """
+    new_df = expt_metadata.sort_values("start_time").reset_index()
+    if "index" in new_df:
+        del new_df["index"]
+    start_times = [datetime.strptime(t,"%H:%M:%S") for t in list(new_df["start_time"])]
+    offsets = [s - start_times[0] for s in start_times]
+    offsets = [o.seconds for o in offsets]
+    new_df["offset"] = offsets
+    for key, value in regexp_dict.items():
+        res = [re.search(value, f) for f in list(new_df["file_name"])]
+        matches = []
+        for r in res:
+            if r:
+                matches.append(r.group(0))
+            else:
+                matches.append(None)
+        new_df[key] = matches
+    
+    return new_df
+    
 
 def generate_file_list(input_path):
     if os.path.isdir(input_path):
@@ -194,7 +218,8 @@ def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5,95], cmap=Non
             img = st[z,:,:,:]
         else:
             img = st[z,:,:,int(c)]
-        plt.imshow(img, interpolation="nearest", vmin=min_value, vmax=max_value, cmap=cmap)
+        q = plt.imshow(img, interpolation="nearest", vmin=min_value, vmax=max_value, cmap=cmap)
+        plt.colorbar(q)
         if len(markers) > 0:
             for marker in markers:
                 plt.plot(marker[0], marker[1], "rx")
@@ -215,9 +240,9 @@ def traces_to_dict(matdata):
         trace_types = [matdata["task_traces"]]
     else:
         trace_types = matdata["task_traces"]
+    dt_dict = {}
     for trace_type in trace_types:
         traces = trace_type["traces"]
-        dt_dict = {}
         if isinstance(traces["name"], str):
             dt_dict[traces["name"]] = traces["values"][rising_edges]
         else:
