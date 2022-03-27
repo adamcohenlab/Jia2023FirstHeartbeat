@@ -250,3 +250,18 @@ def traces_to_dict(matdata):
                 dt_dict[traces["name"][i]] = traces["values"][i][rising_edges]
     t = rising_edges/matdata["clock_rate"]
     return dt_dict, t
+
+def combine_jagged_arrays(arrays, justify="left"):
+    """ Combine traces of different lengths into a 2D array
+    """
+    rows = len(arrays)
+    individual_lengths = [len(arr) for arr in arrays]
+    cols = np.max(individual_lengths)
+    combined = np.ones((rows, cols))*np.nan
+    if justify == "left":
+        for i in range(len(arrays)):
+            combined[i,:individual_lengths[i]] = arrays[i]
+    elif justify == "right":
+        for i in range(len(arrays)):
+            combined[i,-individual_lengths[i]:] = arrays[i]
+    return combined
