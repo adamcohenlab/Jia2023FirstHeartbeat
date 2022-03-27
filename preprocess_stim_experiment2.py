@@ -9,6 +9,7 @@ from sklearn.utils.extmath import randomized_svd
 from skimage import transform, morphology
 from scipy import ndimage, signal, stats
 from spikecounter.analysis import images, traces
+from spikecounter.analysis import stats as sstats
 from spikecounter import utils
 import pickle
 import mat73
@@ -137,7 +138,7 @@ else:
     
 
 # SVD
-denoised = images.denoise_svd(data_matrix_filtered, n_pcs, skewness_threshold=args.skewness_threshold)
+denoised = sstats.denoise_svd(data_matrix_filtered, n_pcs, skewness_threshold=args.skewness_threshold)
 denoised = denoised.reshape(downsampled.shape)
 
 # Add back DC offset for the purposes of comparing noise to mean intensity

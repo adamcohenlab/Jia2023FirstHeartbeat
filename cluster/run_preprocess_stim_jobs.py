@@ -22,6 +22,7 @@ parser.add_argument("--expected_stim_width", default=3, type=int)
 parser.add_argument("--fallback_mask_path", default="0")
 parser.add_argument("--skewness_threshold", default=0)
 parser.add_argument("--n_pcs", default=50)
+parser.add_argument("--crosstalk_mask", default="0", type=str)
 args = parser.parse_args()
 
 rootpath = args.rootpath
@@ -30,31 +31,36 @@ output_dir = args.output_dir
 if output_dir is None:
     output_dir = rootpath
 
+if args.crosstalk_mask == "0":
+    crosstalk_mask = "0"
+else:
+    crosstalk_mask = os.path.join(rootpath, args.crosstalk_mask)
+
 expt_info = pd.read_csv(os.path.join(rootpath, "analysis/experiment_data.csv")).sort_values("start_time").reset_index()
 start_times = [datetime.strptime(t,"%H:%M:%S") for t in list(expt_info["start_time"])]
 offsets = [s - start_times[0] for s in start_times]
 offsets = [o.seconds for o in offsets]
 expt_info["offset"] = offsets
 
-expt_tags = []
-for fn in expt_info["file_name"]:
-    if "pg" in fn:
-        expt_tags.append("stim")
-    elif "recovery" in fn:
-        expt_tags.append("recovery")
-    elif "pacing" in fn:
-        expt_tags.append("prepost")
-    else:
-        expt_tags.append("NA")
-expt_info["tag"] = expt_tags
-expt_info = expt_info.set_index("tag")
-del expt_info["index"]
+# expt_tags = []
+# for fn in expt_info["file_name"]:
+#     if "pg" in fn:
+#         expt_tags.append("stim")
+#     elif "recovery" in fn:
+#         expt_tags.append("recovery")
+#     elif "pacing" in fn:
+#         expt_tags.append("prepost")
+#     else:
+#         expt_tags.append("NA")
+# expt_info["tag"] = expt_tags
+# expt_info = expt_info.set_index("tag")
+# del expt_info["index"]
 
-for f in expt_info.loc["stim"]["file_name"]:
+for f in expt_info["file_name"]:
     sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_widefield_stim.sh", os.path.join(rootpath, "%s.tif" % f), str(args.expected_stims), output_dir, str(args.remove_from_start),\
               str(args.remove_from_end), str(args.scale_factor),\
               str(args.zsc_threshold), str(args.upper), str(args.fs),\
               str(args.start_from_downsampled), str(args.expected_stim_width),\
-               args.fallback_mask_path, str(args.n_pcs), str(args.skewness_threshold)]
+               args.fallback_mask_path, str(args.n_pcs), str(args.skewness_threshold), crosstalk_mask]
     print(sh_line)
     subprocess.run(sh_line)

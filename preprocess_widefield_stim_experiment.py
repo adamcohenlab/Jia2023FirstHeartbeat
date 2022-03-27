@@ -9,6 +9,7 @@ from sklearn.utils.extmath import randomized_svd
 from skimage import transform, morphology
 from scipy import ndimage
 from spikecounter.analysis import images, traces
+from spikecounter.analysis import stats as sstats
 import pickle
 matplotlib.use("Agg")
 
@@ -27,6 +28,7 @@ parser.add_argument("--upper", default=0, type=int)
 parser.add_argument("--expected_stim_width", default=3, type=int)
 parser.add_argument("--fallback_mask_path", default="0", type=str)
 parser.add_argument("--skewness_threshold", default=0, type=float)
+parser.add_argument("--crosstalk_mask", type=str, default="0")
 
 args = parser.parse_args()
 input_file = args.input_file
@@ -37,6 +39,13 @@ remove_from_start = args.remove_from_start
 remove_from_end = args.remove_from_end
 fs = args.fs
 zsc_threshold = args.zsc_threshold
+
+if args.crosstalk_mask == "0":
+    crosstalk_mask = None
+else:
+    crosstalk_mask = skio.imread(args.crosstalk_mask) > 0
+    crosstalk_mask = crosstalk_mask[::int(scale_factor),::int(scale_factor)]
+    print(crosstalk_mask.shape)
 
 if output_folder is None:
     output_folder = os.path.dirname(input_file)
@@ -74,14 +83,14 @@ if args.start_from_downsampled != 1:
 else:
     downsampled = skio.imread(os.path.join(output_folder, "downsampled", os.path.basename(input_file)))
 
-trace = downsampled.mean(axis=(1,2))
+trace = images.image_to_trace(downsampled, mask=crosstalk_mask)
 print(trace.shape)
 if direction == "upper":
     pb_corrected_trace, _ = traces.correct_photobleach(trace, method="localmin", nsamps=int(((fs*2)//2)*2+1))
 else:
     pb_corrected_trace, _ = traces.correct_photobleach(-trace, method="localmin", nsamps=int(((fs*2)//2)*2+1))
-crosstalk_removed, t_mask = traces.remove_stim_crosstalk(pb_corrected_trace, threshold=zsc_threshold, fs=fs, side=direction, mode="interpolate", method="peak_detect",lpad=-1, rpad=1, fixed_width_remove=True, expected_stim_width=args.expected_stim_width, plot=False)
-n_stims_detected = np.sum(t_mask.astype(int))
+crosstalk_removed, t_mask = traces.remove_stim_crosstalk(pb_corrected_trace, threshold=zsc_threshold, fs=fs, side=direction, mode="interpolate", method="peak_detect",lpad=-1, rpad=0, fixed_width_remove=False, expected_stim_width=args.expected_stim_width, plot=False)
+n_stims_detected = np.sum((np.diff(t_mask.astype(int))==1).astype(int))
 print("n_stims_detected: ", n_stims_detected)
 if n_stims_detected < args.n_expected_stims and args.fallback_mask_path != "0":
     print("Stims failed to be detected")
@@ -117,7 +126,7 @@ mean_trace = data_matrix.mean(axis=1)
 corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
 resids = data_matrix - np.outer(mean_trace, corr)
 
-denoised = images.denoise_svd(resids, n_pcs, skewness_threshold=args.skewness_threshold)
+denoised = sstats.denoise_svd(resids, n_pcs, skewness_threshold=args.skewness_threshold)
 denoised = denoised.reshape(downsampled.shape)
 
 # Add back DC offset for the purposes of comparing noise to mean intensity
