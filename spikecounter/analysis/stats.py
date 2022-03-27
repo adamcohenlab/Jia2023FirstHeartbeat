@@ -1,4 +1,5 @@
 from scipy import stats, interpolate
+from sklearn.utils.extmath import randomized_svd
 import numpy as np
 
 def ks_window(data, window, overlap=0.5):
@@ -25,7 +26,12 @@ def correct_cov(cov, rs, ksize=5):
     diff = np.diff(reverse_cov)
     try:
         # Starting from high I, check when the CV starts to decrease again (it shouldn't decrease when I is far from bifurcation)
-        idx = np.argwhere((diff<0)*(fliprs<1)).ravel()[0]
+        try:
+            idx = np.argwhere((diff<0)*(fliprs<1)).ravel()[0]
+        except Exception as e:
+            print(fliprs)
+            print(diff)
+            raise e
     except IndexError:
         # If we can't find an increase find the first time that it's NaN (no peakss detected)
         idx = np.argwhere(np.isnan(reverse_cov)).ravel()[0]-1
@@ -114,3 +120,18 @@ def gen_minfun(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_fac
             raise e
         return cost
     return minfun, f_lookup, cov_lookup
+
+
+def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold=0):
+    """ SVD a data matrix and reconstruct using the first n singular components
+    """
+    u, s, v = randomized_svd(data_matrix, n_components=n_initial_components)
+
+    use_pcs = np.zeros_like(s,dtype=bool)
+    use_pcs[:n_pcs] = True
+    
+    skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
+    use_pcs = use_pcs & (skw > skewness_threshold)
+    
+    denoised = u[:,use_pcs]@ np.diag(s[use_pcs]) @ v[use_pcs,:]
+    return denoised

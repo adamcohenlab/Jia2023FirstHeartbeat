@@ -3,7 +3,7 @@ import scipy.ndimage as ndi
 import skimage.io as skio
 from scipy import signal, stats, interpolate, optimize, ndimage
 import matplotlib.pyplot as plt
-from skimage import transform, filters, morphology, measure
+from skimage import transform, filters, morphology, measure, draw
 from scipy.fft import fft, fftfreq
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -11,36 +11,44 @@ from sklearn.utils.extmath import randomized_svd
 import os
 import mat73
 import warnings
+import colorcet as cc
+import seaborn as sns
+import pickle
+from cycler import cycler
 
 
 from . import traces
 from .. import utils
 from ..ui import visualize
 
-def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold=0):
-    u, s, v = randomized_svd(data_matrix, n_components=n_initial_components)
+def load_dmd_target(rootdir, expt_name, downsample_factor=1):
+    expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
+    width = int(expt_data["camera"]["roi"][1])
+    height = int(expt_data["camera"]["roi"][3])
+    
+    dmd_target = expt_data["dmd_lightcrafter"]['target_image_space']
+    offset_x = int((dmd_target.shape[1] - width)/2)
+    offset_y = int((dmd_target.shape[0] - height)/2)
+    dmd_target = dmd_target[offset_y:-offset_y,offset_x:-offset_x]
+    dmd_target = dmd_target[::downsample_factor,::downsample_factor].astype(bool)
+    return dmd_target
 
-    use_pcs = np.zeros_like(s,dtype=bool)
-    use_pcs[:n_pcs] = True
-    
-    skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
-    use_pcs = use_pcs & (skw > skewness_threshold)
-    
-    denoised = u[:,use_pcs]@ np.diag(s[use_pcs]) @ v[use_pcs,:]
-    return denoised
 
 def load_image(rootdir, expt_name, subfolder="", raw=True):
     d = os.path.join(rootdir, subfolder)
     
     all_files = os.listdir(d)
     expt_files = 0
-    expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
+    try:
+        expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
+    except Exception:
+        expt_data = None
 
-    if raw and subfolder == "":
+    if raw:
         width = int(expt_data["camera"]["roi"][1])
         height = int(expt_data["camera"]["roi"][3])
         try:
-            img = np.fromfile(os.path.join(rootdir, expt_name, "frames.bin"), dtype=np.dtype("<u2")).reshape((-1,width,height))
+            img = np.fromfile(os.path.join(rootdir, subfolder, expt_name, "frames.bin"), dtype=np.dtype("<u2")).reshape((-1,width,height))
         except Exception:
             raw = False
         
@@ -53,22 +61,56 @@ def load_image(rootdir, expt_name, subfolder="", raw=True):
         else:
             img = [skio.imread(os.path.join(d, "%s_block%d.tif" % (expt_name, block+1))) for block in range(expt_files)]
             img = np.concatenate(img, axis=0)
-    
-    fc_max = np.max(expt_data["frame_counter"])
-    if fc_max > img.shape[0]:
-        warnings.warn("%d frames dropped" % (fc_max - img.shape[0]))
-        last_tidx = img.shape[0]
+    if expt_data is not None:
+        fc_max = np.max(expt_data["frame_counter"])
+        if fc_max > img.shape[0]:
+            warnings.warn("%d frames dropped" % (fc_max - img.shape[0]))
+            last_tidx = img.shape[0]
+        else:
+            last_tidx = int(min(fc_max, expt_data["camera"]["frames_requested"] - expt_data["camera"]["dropped_frames"]))
     else:
-        last_tidx = int(min(fc_max, expt_data["camera"]["frames_requested"] - expt_data["camera"]["dropped_frames"]))
+        last_tidx = img.shape[0]
     
     return img[:last_tidx,:,:], expt_data
+
+def load_confocal_image(path, direction="both", extra_offset=2):
+    matdata = mat73.loadmat(path)['dd_compat_py']
+    confocal = matdata['confocal']
+    points_per_line = int(confocal["points_per_line"])
+    numlines = int(confocal["numlines"])
     
+    img = confocal['PMT'].T.reshape((confocal["PMT"].shape[1], numlines, 2, points_per_line))
+    
+    if direction == "fwd":
+        return img[:,:,0,:]
+    
+    
+    elif direction == "both":
+        fwd_scan = img[:,:,0,:]
+        rev_scan = img[:,:,1,:]
+        
+        reshaped_xdata = confocal['xdata'].reshape(numlines, 2,\
+                                           points_per_line)
+        pixel_step = reshaped_xdata[0,0,1] - reshaped_xdata[0,0,0]
+        offset = np.min(np.mean(confocal["galvofbx"][:int(confocal["points_per_line"]),:],axis=1))
+        
+        offset_pix = offset/pixel_step
+        
+        offset_idx = int(np.round(-(offset_pix+extra_offset)))
+        revscan_shift = np.roll(np.flip(rev_scan, axis=2), offset_idx, axis=2)
+        revscan_shift[:,:,:offset_idx] = np.mean(revscan_shift, axis=(1,2))[:,np.newaxis,np.newaxis]
+        
+        mean_img = (fwd_scan + revscan_shift)/2
+        return mean_img
+    
+    else:
+        raise Exception("Not implemented")
 def generate_invalid_frame_indices(stim_trace):
     invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
     invalid_indices_camera = np.concatenate((invalid_indices_daq, invalid_indices_daq+1))
     return invalid_indices_camera
 
-def refine_segmentation_pca(img, mask, n_components=10, threshold_percentile=70):
+def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70):
     """ Refine manual segmentation to localize the heart using PCA assuming that transients are the largest fluctuations present.
     Returns cropped region images and masks for each unique region in the global image mask.
     
@@ -84,18 +126,28 @@ def refine_segmentation_pca(img, mask, n_components=10, threshold_percentile=70)
         return selected_components
     
     region_masks = []
-    
-    region_data, region_pixels = get_all_region_data(img, mask)
+    region_data, region_pixels = get_all_region_data(img, rois)
     for region_idx in range(len(region_data)):
         rd = region_data[region_idx]
+        gc = region_pixels[region_idx]
         rd_bgsub = rd - np.mean(rd, axis=0)
-        pca = PCA(n_components=n_components)
-        pca.fit(rd_bgsub)
-        selected_components = np.abs(pca_component_select(pca))
+        try:
+            pca = PCA(n_components=n_components)
+            pca.fit(rd_bgsub)
+            selected_components = np.abs(pca_component_select(pca))
         
-        mask = generate_cropped_region_image(selected_components > np.percentile(selected_components, threshold_percentile))
+            indices_to_keep = selected_components > np.percentile(selected_components, threshold_percentile)
+    #         print(gc.shape)
+    #         print(indices_to_keep.shape)
+            mask = np.zeros((img.shape[1], img.shape[2]), dtype=bool)
+            mask[gc[:,0],gc[:,1]] = indices_to_keep
+        except ValueError as e:
+            roi_indices = np.unique(rois)
+            roi_indices = roi_indices[roi_indices != 0]
+            mask = rois == roi_indices[region_idx]
+
         selem = np.ones((3,3), dtype=bool)
-        mask = morph.binary_opening(mask, selem)
+        mask = morphology.binary_opening(mask, selem)
         region_masks.append(mask)
         
         
@@ -393,14 +445,21 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
             last_min_before_max = minima[premax_minima_indices[-1]]
     if plot:
         ax1.plot([last_min_before_max, global_max], spl([last_min_before_max, global_max]), "rx")
-    min_val = spl(last_min_before_max)
+    # min_val = spl(last_min_before_max)
+    min_val = np.percentile(spl_values[:global_max], 10)
     halfmax_magnitude = (global_max_val - min_val)/2 + min_val
     try:
 #         halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
 #                                        bounds=[last_min_before_max, global_max]).x
         try:
-            hm = np.argmin((spl_values[last_min_before_max:global_max]-\
-                               halfmax_magnitude)**2) + last_min_before_max
+            # hm = np.argmin((spl_values[last_min_before_max:global_max]-\
+                               # halfmax_magnitude)**2) + last_min_before_max
+            reversed_values = np.flip(spl_values[:global_max])
+            moving_away_from_hm = np.diff(reversed_values-halfmax_magnitude)**2 > 0
+            close_to_hm = (reversed_values-halfmax_magnitude)**2 < ((global_max_val - min_val)*5/global_max)**2
+            hm = global_max - np.argwhere(close_to_hm[:-1] & moving_away_from_hm).ravel()[0]
+            # hm = np.argmin((spl_values[:global_max]-\
+                               # halfmax_magnitude)**2)
 #             halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
 #                                            bounds=[hm-1, hm+1]).x
             hm0 = hm
@@ -411,7 +470,7 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
                 hm0 = hm1
             halfmax = hm1
         except Exception as e:
-#             print(e)
+            print(e)
             beta = np.nan*np.ones(4)
             return beta, spl
         if plot:
@@ -426,6 +485,8 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
     return beta, spl
     
 def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
+    """ Perform spline fitting to functional imaging data do determine wavefront timing
+    """
     knots = np.linspace(0, img.shape[0]-1, num=n_knots)[1:-1]
     q = np.apply_along_axis(lambda tr: spline_fit_single_trace(tr, s, knots), 0, img)
     beta = np.moveaxis(np.array(list(q[0].ravel())).reshape((img.shape[1], img.shape[2],-1)), 2, 0)
@@ -434,10 +495,90 @@ def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
     smoothed_vid = np.moveaxis(smoothed_vid.reshape((img.shape[1], img.shape[2],-1)), 2, 0)
     return beta, smoothed_vid
 
+def process_isochrones(beta, dt, pct_threshold=50, plot=False):
+    """ Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude values 
+    """
+    amplitude = beta[2,:,:]
+    amplitude_nanr = np.copy(amplitude)
+    minval = np.nanmin(amplitude)
+    amplitude_nanr[np.isnan(amplitude)] = minval
+    # thresh = (np.percentile(amplitude_nanr,90)-1)*pct_threshold/100+1
+    thresh = np.percentile(amplitude_nanr, pct_threshold)
+    print(thresh)
+    # thresh = filters.threshold_otsu(amplitude_nanr)
+    mask = amplitude_nanr>thresh
+    mask = morphology.binary_opening(mask, selem=morphology.disk(2))
+    mask = morphology.binary_closing(mask, selem=morphology.disk(2))
+    
+    labels = measure.label(mask)
+    label_values, counts = np.unique(labels, return_counts=True)
+    label_values = label_values[1:]
+    counts = counts[1:]
+    mask = labels == label_values[np.argmax(counts)]
+    
+    if plot:
+        fig1, ax1 = plt.subplots(figsize=(3,3))
+        visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax = ax1)
+    
+    hm = beta[1,:,:]
+    average_regional_nans = ndimage.convolve(np.isnan(hm), np.ones((3,3)))
+    convinput = np.copy(hm)
+    convinput[np.isnan(hm)] = 0
+    kernel = np.ones((3,3))
+    kernel[1,1] = 0
+    hm_nans_removed = np.copy(hm)
+    hm_nans_removed[np.isnan(hm)] = ndimage.convolve(convinput,kernel)[np.isnan(hm)]
+    
+    hm_smoothed = ndimage.median_filter(hm_nans_removed, size=3)
+    hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1)
+    hm_nan = np.copy(hm_smoothed)
+    hm_nan[~mask] = np.nan
+    hm_nan = hm_nan*dt*1000
+    
+    return hm_nan
+
+def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
+    """ Use local polynomial fitting strategy from Bayley et al. 1998 to determine velocity from activation map
+    """
+    X, Y = np.meshgrid(np.arange(activation_times.shape[0]), np.arange(activation_times.shape[1]))
+    coords = np.array([Y.ravel(), X.ravel()]).T
+    Tsmoothed = np.ones_like(activation_times)*np.nan
+    residuals = np.ones_like(activation_times)*np.nan
+    v = np.ones((2, activation_times.shape[0], activation_times.shape[1]))*np.nan
+    for y,x in coords:
+        # if np.isnan(activation_times[y, x]):
+        #     continue
+        local_X, local_Y = np.meshgrid(np.arange(max(0, x-deltax), min(activation_times.shape[1], x+deltax+1)),\
+                                       np.arange(max(0, y-deltay), min(activation_times.shape[0], y+deltay+1)))\
+                            - np.array([x,y])[:,np.newaxis,np.newaxis]
+        local_times = activation_times[max(0, y-deltay):min(activation_times.shape[0], y+deltay+1),\
+                                      max(0, x-deltax):min(activation_times.shape[1], x+deltax+1)]
+        local_X = local_X.ravel()
+        local_Y = local_Y.ravel()
+        A = np.array([local_X**2, local_Y**2, local_X*local_Y, local_X, local_Y, np.ones_like(local_X)]).T
+        b = local_times.ravel() 
+        A = A[~np.isnan(b),:]
+        b = b[~np.isnan(b)]
+        mask = np.abs(b - activation_times[y,x]) < deltat
+        A = A[mask,:]
+        b = b[mask]
+        
+        if len(b) < 10:
+            continue
+        try:
+            p, res, _, _ = np.linalg.lstsq(A, b)
+            Tsmoothed[y,x] = p[5]
+            residuals[y,x] = res
+            v[:,y,x] = p[3:5]/(p[3]**2 + p[4]**2)
+        except Exception as e:
+            pass
+    return v, Tsmoothed
+
 def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=False):
     """ Perform photobleach correction on each pixel in an image
     """
     if method == "linear":
+        # Perform linear fit to each pixel independently over time
         corrected_img = np.zeros_like(img)
         for y in range(img.shape[1]):
             for x in range(img.shape[2]):
@@ -445,6 +586,7 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
                 corrected_img[:, y,x] = corrected_trace
                 
     elif method == "localmin":
+        # 
         if invert:
             mean_img = img.mean(axis=0)
             raw_img = 2*mean_img - img
@@ -454,6 +596,7 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
         _, pbleach = traces.correct_photobleach(mean_trace, method=method, nsamps=nsamps)
         corrected_img = np.divide(raw_img, pbleach[:,np.newaxis,np.newaxis])
         print(corrected_img.shape)
+        
     elif method == "monoexp":
         mean_trace = image_to_trace(img, mask)
         tpoints = np.arange(len(mean_trace))
@@ -469,6 +612,18 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
         ax1.plot(tpoints, popt[0]*np.exp(popt[1]*tpoints) + popt[2], color="red")
         
         corrected_img = img/((popt[2]+popt[0]*np.exp(tpoints*popt[1]))[:,np.newaxis,np.newaxis]) + popt[2]
+    elif method == "decorrelate":
+        # Zero the mean over time
+        mean_img = img.mean(axis=0)
+        t_zeroed = img - mean_img
+        data_matrix = t_zeroed.reshape((t_zeroed.shape[0], -1))
+
+        # correlate to mean trace
+        mean_trace = data_matrix.mean(axis=1)
+        corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
+        resids = data_matrix - np.outer(mean_trace, corr)
+        
+        corrected_img = mean_img + resids.reshape(img.shape)
     else:
         raise ValueError("Not Implemented")
         
@@ -482,13 +637,6 @@ def get_image_dFF(img, baseline_percentile=10):
     dFF = img/baseline
     return dFF
 
-def filter_and_downsample(img, filter_function, sampling_factor=2):
-    """ filter in time and downsample
-
-    """
-    filtered_img = np.apply_along_axis(filter_function, 0, img)
-    filtered_img = filtered_img[np.arange(filtered_img.shape[0], step=sampling_factor),:,:]
-    return filtered_img
 
 def get_spike_videos(img, peak_indices, before, after, normalize_height=True):
     """ Generate spike-triggered videos of a defined length from a long video and peak indices
@@ -879,6 +1027,8 @@ def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, save
 #     else:
 #         return new_mask_labels, coms
 
+
+
 def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=True, band_bounds=(0.1, 2), \
                    band_threshold=0.45, full_output=False, opening_size=5, dilation_size=15, f_s=1, \
                      intensity_threshold=0.5, bbox_offset=5, corr_threshold=0.9):
@@ -902,9 +1052,8 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
     norm_abs_power = abs_power/np.sum(abs_power, axis=0)
 
     band_power = np.sum(norm_abs_power[(fft_freq>band_bounds[0]) & (fft_freq<band_bounds[1]),:,:], axis=0)
-    smoothed_band_power = filters.median(band_power, selem=np.ones((5,5)))
-    processed_band_power = morphology.binary_opening((smoothed_band_power > band_threshold)\
-                                                     *(intensity_mask), selem=np.ones((3,3)))
+    smoothed_band_power = filters.median(band_power, selem=np.ones((5,5)))*intensity_mask.astype(int)
+    processed_band_power = morphology.binary_opening((smoothed_band_power > band_threshold), selem=np.ones((3,3)))
     initial_guesses = measure.label(processed_band_power)
     bboxes = [p["bbox"] for p in measure.regionprops(initial_guesses)]
     new_mask = np.zeros_like(mean_img, dtype=bool)
@@ -1011,13 +1160,15 @@ def pairwise_mindist(x, y):
     return mindist, mindist_indices
 
 def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_labels=True):
+    """ Connect two ROI segmentations adjacent in time
+    """
     curr_mask = curr_labels > 0
     all_curr_labels = np.unique(curr_labels)[1:]
     all_prev_labels = np.unique(prev_labels)[1:]
 
     curr_coms = ndi.center_of_mass(curr_mask, labels=curr_labels, index=all_curr_labels)
     curr_coms = np.array(curr_coms)
-    if len(curr_coms.shape) == 2:
+    if len(curr_coms.shape) == 2 and len(prev_coms) > 0:
         curr_coms = curr_coms[:,0] + 1j*curr_coms[:,1]
 
         mindist, mindist_indices = pairwise_mindist(curr_coms, prev_coms)
@@ -1026,7 +1177,7 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
         link_prev = set(mindist_indices[link_curr]+1)
 
         link_curr = set(link_curr+1)
-    elif len(curr_coms.shape) ==1:
+    elif len(curr_coms.shape) == 1 or len(prev_coms)==0:
         link_curr = set([])
         link_prev = set([])
     all_curr_labels_set = set(all_curr_labels)
@@ -1044,7 +1195,10 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     
     unassigned_curr_labels = all_curr_labels_set - link_curr
     new_rois_counter = 0
-    starting_idx = np.max(all_prev_labels)+1
+    try:
+        starting_idx = np.max(all_prev_labels)+1
+    except Exception:
+        starting_idx = 1
     for label in unassigned_curr_labels:
         if np.all(new_labels[curr_labels==label]==0):
             new_labels[curr_labels == label] = starting_idx + new_rois_counter
@@ -1054,8 +1208,6 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     new_coms = np.array(new_coms)
     new_coms = new_coms[:,0] + 1j*new_coms[:,1]
     return new_labels, new_coms
-    
-    
 
 def link_stack(stack, step=-1, radius=15, propagate_old_labels=True):
     if step <0:
@@ -1068,7 +1220,8 @@ def link_stack(stack, step=-1, radius=15, propagate_old_labels=True):
     
     prev_coms = ndi.center_of_mass(prev_mask, labels=prev_labels, index=np.arange(1,np.max(prev_labels)+1))
     prev_coms = np.array(prev_coms)
-    prev_coms = prev_coms[:,0] + 1j*prev_coms[:,1]
+    if len(prev_coms.shape)==2:
+        prev_coms = prev_coms[:,0] + 1j*prev_coms[:,1]
     new_labels = [prev_labels]
     while curr_t >=0 and curr_t < stack.shape[0]:
         curr_labels = stack[curr_t]
@@ -1109,6 +1262,8 @@ def closest_non_zero(arr):
     return nonzeros[min_indices]
 
 def fill_missing(vid, threshold=100):
+    """ Detect when an ROI drops out of a sequence of movies
+    """
     roi_sizes = []
     for roi in range(1, np.max(vid)+1):
         roi_sizes.append(np.sum(vid==roi, axis=(1,2)))
@@ -1120,3 +1275,27 @@ def fill_missing(vid, threshold=100):
         replaced_vals = vid[closest_above_threshold[i-1],:,:] == i
         filled_vid[replaced_vals] = i
     return filled_vid
+
+def get_regularized_mask(img, rois):
+    """ Correct noisy segmentation using the fact that the hearts are roughly the same size. Take the mean area and draw a circle with the same area centered at the centroid of each original ROI.
+    """
+    mask_labels = np.unique(rois)
+    mask_labels = mask_labels[mask_labels != 0]
+
+    rps = measure.regionprops(rois)
+
+    areas = [p["area"] for p in rps]
+    centroids = np.array([p["centroid"] for p in rps])
+    mean_area = np.mean(areas)
+    radius = (mean_area/np.pi)**0.5
+    
+    area_regularized_mask = np.zeros_like(refined_mask)
+    for i in range(len(region_masks)):
+        rr, cc = draw.disk(tuple(centroids[i,:]), radius)
+        valid_indices = (rr < refined_mask.shape[0]) & (cc < refined_mask.shape[1]) & (rr >= 0) & (cc >= 0)
+        rr = rr[valid_indices]
+        cc = cc[valid_indices]
+        area_regularized_mask[rr, cc] = mask_labels[i]
+    
+    return area_regularized_mask
+
