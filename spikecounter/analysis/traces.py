@@ -104,7 +104,8 @@ def standard_lp_filter(raw, norm_thresh=0.5):
     # intensity = signal.filtfilt(b, a, intensity)
     return intensity
 
-def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_prom_scale=0.5, auto_thresh_scale=0.5):
+def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_prom_scale=0.5, auto_thresh_scale=0.5, min_width=None, max_width=None, \
+                  baseline_start=0, baseline_duration=1000, excl=0):
     """ Analyze peaks within a given trace and return the following statistics, organized in a pandas DataFrame:
 
     peak_idx: index where each peak is
@@ -114,19 +115,24 @@ def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_p
     """
     if prominence == "auto":
         p = np.percentile(trace, 95)*auto_prom_scale
+    elif prominence == "snr":
+        noise = np.std(trace.ravel()[baseline_start:baseline_start+baseline_duration])
+        print(noise)
+        p = noise*auto_prom_scale
     else:
         p = prominence
     if threshold == "auto":
-        t = np.percentile(trace,95)*auto_thresh_scale
+        t = np.percentile(trace, 95)*auto_thresh_scale
     else:
         t = threshold
         
     print(p, t)
     
-    peaks, properties = signal.find_peaks(trace, prominence=p, height=0, wlen=wlen)
+    peaks, properties = signal.find_peaks(trace, prominence=p, height=t, wlen=wlen, width = (min_width, max_width), rel_height=0.5)
+    
     prominences = np.array(properties["prominences"])
-    prominences = prominences[trace[peaks]>t]
-    peaks = peaks[trace[peaks]>t]
+    prominences = prominences[peaks > excl*f_s]
+    peaks = peaks[peaks > excl*f_s]
     fwhm = signal.peak_widths(trace, peaks, rel_height=0.5)[0]/f_s
     isi = (peaks[1:] - peaks[:-1])/f_s
     isi = np.append(isi, np.nan)
@@ -643,7 +649,8 @@ class TimelapseArrayExperiment():
         idx = np.argwhere(timepoint < time_array).ravel()[0] - 1
         return self.block_metadata["file_name"].iloc[idx]
 
-    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5, prefilter=None):
+    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5, prefilter=None, min_width=None,\
+                      max_width=None,baseline_start=0,baseline_duration=1000,excl=0):
         """ Apply scipy detect_peaks on all ROIs and 
         """
         dfs = []
@@ -653,7 +660,10 @@ class TimelapseArrayExperiment():
                     trace = self.dFF[roi,:]
                 else:
                     trace = prefilter(self.dFF[roi,:])
-                df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold, f_s=self.f_s, auto_prom_scale=auto_prom_scale, auto_thresh_scale=auto_thresh_scale)
+                df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold,\
+                                   f_s=self.f_s, auto_prom_scale=auto_prom_scale, auto_thresh_scale=auto_thresh_scale,\
+                                   min_width = min_width, max_width = max_width, baseline_duration=baseline_duration,\
+                                  baseline_start = baseline_start, excl=excl)
             except Exception as e:
                 print("ROI: %d" % roi)
                 raise e
@@ -984,7 +994,7 @@ class TimelapseArrayExperiment():
         """
         roi_it = utils.convert_to_iterable(rois)
         roi_it = list(roi_it)
-
+        spectrograms = []
         fig1, axes = visualize.tile_plots_conditions(roi_it, figsize)
         for idx, roi in enumerate(roi_it):
             f, t_s, Sxx = signal.spectrogram(self.dFF[roi,:]-np.mean(self.dFF[roi,:]), fs=self.f_s, nperseg=nperseg, noverlap=noverlap)
@@ -1001,8 +1011,9 @@ class TimelapseArrayExperiment():
             cbar = fig1.colorbar(img, aspect=20, shrink=0.7, label=r"$S_{xx}(f)$", ax=axes[idx])
 
             axes[idx].set_title("E%d" % roi)
+            spectrograms.append(Sxx)
             
-        return fig1, axes
+        return fig1, axes, spectrograms
             
     def _get_time(self, time):
         """Returns t, timeseries_start

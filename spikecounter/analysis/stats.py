@@ -1,6 +1,8 @@
 from scipy import stats, interpolate
+from sklearn import neighbors
 from sklearn.utils.extmath import randomized_svd
 import numpy as np
+import matplotlib.pyplot as plt
 
 def ks_window(data, window, overlap=0.5):
     """ Perform Kolmogorov-Smirnov test over windowed portions of some data
@@ -29,8 +31,8 @@ def correct_cov(cov, rs, ksize=5):
         try:
             idx = np.argwhere((diff<0)*(fliprs<1)).ravel()[0]
         except Exception as e:
-            print(fliprs)
-            print(diff)
+            # print(fliprs)
+            # print(diff)
             raise e
     except IndexError:
         # If we can't find an increase find the first time that it's NaN (no peakss detected)
@@ -38,7 +40,7 @@ def correct_cov(cov, rs, ksize=5):
     # set CV to 1
     reverse_cov[idx+1:] = 1
     # Moving average smoothing
-    reverse_cov[idx-ksize//2:idx+ksize//2] = np.convolve(reverse_cov, np.ones(ksize)/ksize, mode="same")[idx-ksize//2:idx+ksize//2]
+    # reverse_cov[idx-ksize//2:idx+ksize//2] = np.convolve(reverse_cov, np.ones(ksize)/ksize, mode="same")[idx-ksize//2:idx+ksize//2]
     return np.flip(reverse_cov)
 
 def remove_small_windows(cov, min_window_length):
@@ -93,6 +95,7 @@ def gen_exptdata(freq_trace, cov_trace, plot=False, n_points_offset=0, min_windo
         covdata = np.concatenate((np.ones(n_points_offset), covdata))
     fdata = freq_trace[last_nan_before_f:first_nan_after_f]
     # Interpolate frequency data to downsample
+
     freq_interp_f = interpolate.interp1d(np.arange(len(fdata)), fdata, fill_value="extrapolate")
     finterp = freq_interp_f(np.linspace(0, len(fdata), num=len(covdata), endpoint=False))
     xvals = np.arange(len(covdata))
@@ -110,9 +113,11 @@ def gen_minfun(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_fac
     # Define function to be minimized
     def minfun(x):
         try:
-            # Squared difference between simuled and experimental values. Hard-coded scale factor in x as an order of magnitude estimate to make individual optimization steps better behaved.
-            cost = (np.sum(np.power(f_lookup(xvals_data/scale_factor/x[0] - x[1]) - f_data*x[2], 2)) \
-                + rel_weight*np.sum(np.power(cov_lookup(xvals_data/scale_factor/x[0] - x[1]) - cov_data, 2)))/len(xvals_data)
+            # Squared difference between simulated and experimental values. Hard-coded scale factor in x as an order of magnitude estimate to make individual optimization steps better behaved.
+            sim_freq_values = f_lookup(xvals_data/scale_factor/x[0] - x[1])
+            sim_cov_values = cov_lookup(xvals_data/scale_factor/x[0] - x[1])
+            cost = (np.sum(np.power(sim_freq_values - f_data*x[2], 2)) \
+                + rel_weight*np.sum(np.power(sim_cov_values - cov_data, 2)))/len(xvals_data)
         except Exception as e:
             print(xvals.shape)
             print(fdata.shape)
@@ -121,6 +126,54 @@ def gen_minfun(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_fac
         return cost
     return minfun, f_lookup, cov_lookup
 
+def gen_minfun_inc_nans(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_factor, rel_weight=1):
+    """ Generate function to be minimized in nonlinear optimization.
+    """
+    ccov = correct_cov(cv_sim, xvals_sim)
+    
+    # Generate lookup functions for simulated traces
+    f_lookup = interpolate.interp1d(xvals_sim, f_sim, fill_value="extrapolate")
+    cov_lookup = interpolate.interp1d(xvals_sim, ccov, fill_value="extrapolate")
+
+    # Define function to be minimized
+    def minfun(x):
+        try:
+            # Squared difference between simulated and experimental values. Hard-coded scale factor in x as an order of magnitude estimate to make individual optimization steps better behaved.
+            nanmask_f = np.isnan(f_data)
+            nanmask_cv = np.isnan(cov_data)
+            
+            sim_freq_values = f_lookup((xvals_data[~nanmask_f]- x[1])/scale_factor/x[0] + 1)
+            sim_cov_values = cov_lookup((xvals_data[~nanmask_cv] - x[1])/scale_factor/x[0] + 1)
+            cost = np.sum(np.power(sim_freq_values - f_data[~nanmask_f]*x[2], 2))/np.sum(~nanmask_f) \
+                + rel_weight*np.sum(np.power(sim_cov_values - cov_data[~nanmask_cv], 2))/np.sum(~nanmask_cv)
+        except Exception as e:
+            print(xvals.shape)
+            print(fdata.shape)
+            print(covdata.shape)
+            raise e
+        return cost
+    return minfun, f_lookup, cov_lookup
+
+
+
+def gen_minfun_freq_only(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_factor):
+    """ Generate function for fitting frequency in nonlinear optimization 
+    """
+    # Generate lookup functions for simulated traces
+    ccov = correct_cov(cv_sim, xvals_sim)
+    f_lookup = interpolate.interp1d(xvals_sim, f_sim, fill_value="extrapolate")
+    cov_lookup = interpolate.interp1d(xvals_sim, ccov, fill_value="extrapolate")
+    def minfun(x):
+        try:
+            # Squared difference between simulated and experimental values. Hard-coded scale factor in x as an order of magnitude estimate to make individual optimization steps better behaved.
+            sim_values = f_lookup(xvals_data/scale_factor/x[0] - x[1])
+            cost = np.sum(np.power((sim_values - f_data*x[2])/sim_values, 2))/len(xvals_data)
+        except Exception as e:
+            print(xvals.shape)
+            print(fdata.shape)
+            raise e
+        return cost
+    return minfun, f_lookup, cov_lookup
 
 def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold=0):
     """ SVD a data matrix and reconstruct using the first n singular components
@@ -135,3 +188,31 @@ def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold
     
     denoised = u[:,use_pcs]@ np.diag(s[use_pcs]) @ v[use_pcs,:]
     return denoised
+
+def trajectory_variability_kde(x, y, nsamples=100, bandwidth=1, pady=0):
+    """ Take a set of measurements x, y (x values do not have to match) and generate
+    a mean trajectory with standard deviations using kernel density estimator.
+    """
+    
+    data = np.array([x, y]).T
+    kde = neighbors.KernelDensity(bandwidth=bandwidth)
+    kde.fit(data)
+    
+    x_samples = np.linspace(np.min(x), np.max(x), num=nsamples)
+    y_samples = np.linspace(np.min(y)-pady, np.max(y)+pady, num=nsamples)
+    
+    data_samples = np.array([np.tile(x_samples, (nsamples,1)), np.tile(y_samples, (nsamples,1)).T])
+    # Calculate densities
+    probability_densities = np.zeros((nsamples, nsamples))
+    for i in range(nsamples):
+#         print(data_samples[:,:,i].T)
+        probability_densities[i,:] = np.exp(kde.score_samples(data_samples[:,:,i].T))
+#         print(probability_densities)
+    # plt.imshow(probability_densities)
+    normalization = np.sum(probability_densities, axis=1)
+    # Marginalize along y
+    mean_y = np.sum(y_samples[np.newaxis,:]*probability_densities, axis=1)/normalization
+    var_y = np.sum((y_samples-mean_y)[np.newaxis,:]**2*probability_densities, axis=1)/normalization
+    std_y = np.sqrt(var_y)
+    
+    return x_samples, mean_y, std_y
