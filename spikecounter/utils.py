@@ -265,3 +265,25 @@ def combine_jagged_arrays(arrays, justify="left"):
         for i in range(len(arrays)):
             combined[i,-individual_lengths[i]:] = arrays[i]
     return combined
+
+def align_traces(unaligned_traces, all_index_offsets):
+    """ Align a list of (blocks of) unaligned traces of varying sizes and known index offsets.
+    Return the aligned traces and the global time coordinate.
+    """
+    n_traces = [ut.shape[0] for ut in unaligned_traces]
+    total_traces = np.sum(n_traces)
+    max_length = np.max([ut.shape[1] for ut in unaligned_traces])
+    max_offset = np.max([np.max(ao) for ao in all_index_offsets])
+    n_timepoints = max_length + max_offset
+    
+    aligned_traces = np.nan*np.ones((total_traces, n_timepoints))
+    curr_row = 0
+    for i in range(len(n_traces)):
+        ut = unaligned_traces[i]
+        ao = all_index_offsets[i]
+        for j in range(ut.shape[0]):
+            start_idx = aligned_traces.shape[1] - max_length - ao[j]
+            aligned_traces[curr_row, start_idx:start_idx+ut.shape[1]] = ut[j,:]
+            curr_row +=1
+    global_time = np.arange(aligned_traces.shape[1]) - max_offset
+    return aligned_traces, global_time

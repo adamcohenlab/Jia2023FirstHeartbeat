@@ -36,12 +36,12 @@ def tile_plots_conditions(condition_list, subplot_size, disp_titles=True):
     """
     n_rows = int(np.ceil(np.sqrt(len(condition_list))))
     fig1, axes = plt.subplots(n_rows, n_rows, figsize=(subplot_size[0]*n_rows, subplot_size[1]*n_rows))
-    if disp_titles:
-        for idx, c in enumerate(condition_list):
-            axes.ravel()[idx].set_title(c)
     if n_rows ==1:
         axes = np.array([axes])
     axes = axes.ravel()
+    if disp_titles:
+        for idx, c in enumerate(condition_list):
+            axes[idx].set_title(c)
     return fig1, axes
 
 def plot_scalebars(ax, scalebar_params, pct_f=False):
