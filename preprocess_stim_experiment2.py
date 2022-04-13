@@ -25,11 +25,15 @@ parser.add_argument("--n_pcs", help="Number of PCs to keep", default=50, type=in
 parser.add_argument("--remove_from_start", help="Time indices to trim from start", default=0, type=int)
 parser.add_argument("--remove_from_end", help="Time indices to trim from end", default=0, type=int)
 parser.add_argument("--start_from_downsampled", default=0, type=int)
+parser.add_argument("--pb_correct_method", default="localmin", type=str)
 parser.add_argument("--filter_skewness", default=1, type=int)
 parser.add_argument("--skewness_threshold", default=2, type=float)
 parser.add_argument("--left_shoulder", default=16,type=float)
 parser.add_argument("--right_shoulder", default=19, type=float)
 parser.add_argument("--invert", default=0, type=int)
+parser.add_argument("--lpad", default=0, type=int)
+parser.add_argument("--rpad", default=0, type=int)
+parser.add_argument("--fs", default=10.2, type=float)
 
 def generate_invalid_frame_indices(stim_trace, dt_frame):
     invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
@@ -53,11 +57,13 @@ remove_from_end = args.remove_from_end
 if output_folder is None:
     output_folder = rootdir
 
-expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
-
-trace_dict, t = utils.traces_to_dict(expt_data)
-dt_frame = np.mean(np.diff(t))
-fs = 1/dt_frame
+try:
+    expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
+    trace_dict, t = utils.traces_to_dict(expt_data)
+    dt_frame = np.mean(np.diff(t))
+    fs = 1/dt_frame
+except Exception:
+    fs = args.fs
 
 os.makedirs(os.path.join(output_folder, "denoised"), exist_ok=True)
 os.makedirs(os.path.join(output_folder, "downsampled"), exist_ok=True)
@@ -98,6 +104,13 @@ else:
         invalid_mask = np.zeros(downsampled.shape[0], dtype=bool)
         invalid_indices = invalid_indices[invalid_indices < downsampled.shape[0]]
         invalid_mask[invalid_indices] = True
+        if args.lpad > 0:
+            for i in range(args.lpad+1):
+                print("lpad", i)
+                invalid_mask[invalid_indices-i] = True
+        if args.rpad > 0:
+            for i in range(args.rpad+1):
+                invalid_mask[invalid_indices+i] = True
 
         mean_img = downsampled[~invalid_mask].mean(axis=0)
         data_matrix = downsampled.reshape(downsampled.shape[0], -1)
@@ -114,9 +127,10 @@ else:
 
 
 # Correct photobleach
-nsamps = (int(2*fs)//2)*2 +1
-print(args.invert)
-pb_corrected_img = images.correct_photobleach(stim_frames_removed, mask=None, method="localmin", nsamps=nsamps, invert=args.invert)
+nsamps = (int(2.5*fs)//2)*2 +1
+mask = mean_img > np.percentile(mean_img, 70)
+pb_corrected_img = images.correct_photobleach(stim_frames_removed, mask=None, method=args.pb_correct_method,\
+                                              nsamps=nsamps, invert=args.invert)
 skio.imsave(os.path.join(output_folder, "corrected", "%s.tif" % expt_name), pb_corrected_img)
 
 

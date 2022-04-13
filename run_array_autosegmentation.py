@@ -23,6 +23,8 @@ parser.add_argument("--band_threshold", default=0.45, type=float)
 parser.add_argument("--corr_threshold", default=0.9, type=float)
 parser.add_argument("--band_min", default = 0.1, type=float)
 parser.add_argument("--band_max", default = 2, type=float)
+parser.add_argument("--block_size", default=375, type=int)
+parser.add_argument("--offset", default=0.01, type=float)
 
 def link_frames(curr_labels, prev_labels, prev_coms, radius=15):
     curr_mask = curr_labels > 0
@@ -153,7 +155,7 @@ vid, exclude_from_write = images.segment_widefield_series(pathnames, args.n_embr
                                       remove_from_end=args.time_remove_from_end, \
                                       f_s=args.f_s, band_bounds=(args.band_min,args.band_max), opening_size=args.opening_size,\
                                      dilation_size=args.dilation_size, band_threshold=args.band_threshold,\
-                                      intensity_threshold=args.intensity_threshold, corr_threshold=args.corr_threshold)
+                                      block_size=args.block_size, offset=args.offset, corr_threshold=args.corr_threshold)
 os.makedirs(os.path.join(args.data_folder, "analysis"), exist_ok=True)
 skio.imsave(os.path.join(args.data_folder, "analysis", "unlinked_segmentation_video.tif"), vid)
 linked_vid = link_stack(vid)
