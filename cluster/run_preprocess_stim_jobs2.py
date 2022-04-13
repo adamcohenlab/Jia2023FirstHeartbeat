@@ -21,6 +21,10 @@ parser.add_argument("--skewness_threshold", default=2, type=float)
 parser.add_argument("--left_shoulder_freq", default=16, type=float)
 parser.add_argument("--right_shoulder_freq", default=19, type=float)
 parser.add_argument("--invert", default=0, type=bool)
+parser.add_argument("--pb_correct_method", default="localmin", type=str)
+parser.add_argument("--lpad", default=0, type=int)
+parser.add_argument("--rpad", default=0, type=int)
+
 args = parser.parse_args()
 
 rootpath = args.rootpath
@@ -35,6 +39,6 @@ expt_info = pd.read_csv(os.path.join(rootpath,args.expt_info)).sort_values("star
 for f in expt_info["file_name"]:
     sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_stim2.sh", rootpath, f, args.crosstalk_channel, output_dir, str(args.remove_from_start),\
               str(args.remove_from_end), str(args.scale_factor),\
-              str(args.start_from_downsampled), str(args.n_pcs), str(args.skewness_threshold), str(args.left_shoulder_freq), str(args.right_shoulder_freq), str(int(args.invert))]
+              str(args.start_from_downsampled), str(args.n_pcs), str(args.skewness_threshold), str(args.left_shoulder_freq), str(args.right_shoulder_freq), str(int(args.invert)), args.pb_correct_method, str(args.lpad), str(args.rpad)]
     print(sh_line)
     subprocess.run(sh_line)
