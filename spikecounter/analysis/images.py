@@ -19,8 +19,16 @@ import traceback
 import re
 
 from . import traces
+from . import stats as sstats
 from .. import utils
 from ..ui import visualize
+
+
+def regress_video(img, traces, regress_dc = True):
+    """ Linearly regress arbitrary traces from a video
+    """
+    data_matrix = img.reshape((img.shape[0], -1))
+    return sstats.multi_regress(data_matrix, traces, regress_dc=regress_dc).reshape(img.shape)
 
 def load_dmd_target(rootdir, expt_name, downsample_factor=1):
     expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
@@ -406,7 +414,7 @@ def kernel_fit_single_trace(trace, kernel, minshift, maxshift, offset_width):
     beta = np.append(beta, error_det)
     return beta
 
-def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0.01):
+def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0.01, ax1=None):
     """ Least squares spline fitting of a single timeseries
     """
     x = np.arange(len(trace))
@@ -415,7 +423,8 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
     spl = interpolate.BSpline(t,c,k)
     spl_values = spl(x)    
     if plot:
-        fig1, ax1 = plt.subplots(figsize=(12,4))
+        if ax1 is None:
+            fig1, ax1 = plt.subplots(figsize=(12,4))
         ax1.plot(trace)
         ax1.plot(spl(x))
     
@@ -487,17 +496,30 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
                     break
                 hm0 = hm1
             halfmax = hm1
+            
+            local_max_deriv_idx = np.argwhere(np.diff(np.sign(d2spl(x)))).ravel()
+            local_max_deriv_idx = local_max_deriv_idx[local_max_deriv_idx < global_max]
+            if len(local_max_deriv_idx) > 0:
+                max_deriv_idx = local_max_deriv_idx[np.argmin((local_max_deriv_idx - halfmax)**2)]
+                max_deriv_interp = max_deriv_idx + (0-d2spl(max_deriv_idx))/(d2spl(max_deriv_idx+1)-d2spl(max_deriv_idx))
+            else:
+                max_deriv_interp = np.nan
+            
         except Exception as e:
             print(e)
-            beta = np.nan*np.ones(4)
+            beta = np.nan*np.ones(5)
             return beta, spl
         if plot:
             ax1.plot(halfmax, spl(halfmax), "gx")
     except Exception as e:
-        beta = np.nan*np.ones(4)
+        # print(e)
+        beta = np.nan*np.ones(5)
         return beta, spl
-    beta = np.array([global_max, halfmax, global_max_val/min_val,res])
-    return beta, spl
+    beta = np.array([global_max, halfmax, global_max_val/min_val, res, max_deriv_interp])
+    if plot:
+        return beta, spl, ax1
+    else:
+        return beta, spl
     
 def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
     """ Perform spline fitting to functional imaging data do determine wavefront timing
@@ -510,7 +532,7 @@ def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
     smoothed_vid = np.moveaxis(smoothed_vid.reshape((img.shape[1], img.shape[2],-1)), 2, 0)
     return beta, smoothed_vid
 
-def process_isochrones(beta, dt, pct_threshold=50, plot=False):
+def process_isochrones(beta, dt, threshold=None, plot=False):
     """ Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude values 
     """
     amplitude = beta[2,:,:]
@@ -518,10 +540,11 @@ def process_isochrones(beta, dt, pct_threshold=50, plot=False):
     minval = np.nanmin(amplitude)
     amplitude_nanr[np.isnan(amplitude)] = minval
     # thresh = (np.percentile(amplitude_nanr,90)-1)*pct_threshold/100+1
-    thresh = np.percentile(amplitude_nanr, pct_threshold)
-    print(thresh)
+    if threshold is None:
+        threshold = np.percentile(amplitude_nanr, 50)
+        
     # thresh = filters.threshold_otsu(amplitude_nanr)
-    mask = amplitude_nanr>thresh
+    mask = amplitude_nanr>threshold
     mask = morphology.binary_opening(mask, selem=morphology.disk(2))
     mask = morphology.binary_closing(mask, selem=morphology.disk(2))
     
@@ -536,21 +559,34 @@ def process_isochrones(beta, dt, pct_threshold=50, plot=False):
         visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax = ax1)
     
     hm = beta[1,:,:]
-    average_regional_nans = ndimage.convolve(np.isnan(hm), np.ones((3,3)))
-    convinput = np.copy(hm)
-    convinput[np.isnan(hm)] = 0
-    kernel = np.ones((3,3))
-    kernel[1,1] = 0
-    hm_nans_removed = np.copy(hm)
-    hm_nans_removed[np.isnan(hm)] = ndimage.convolve(convinput,kernel)[np.isnan(hm)]
+    dv = beta[4,:,:]
+    
+    hm_nans_removed = remove_nans(hm)
+    dv_nans_removed = remove_nans(dv)
     
     hm_smoothed = ndimage.median_filter(hm_nans_removed, size=3)
     hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1)
-    hm_nan = np.copy(hm_smoothed)
-    hm_nan[~mask] = np.nan
-    hm_nan = hm_nan*dt*1000
+    hm_smoothed[~mask] = np.nan
+    hm_smoothed *= dt*1000
     
-    return hm_nan
+    dv_smoothed = ndimage.median_filter(dv_nans_removed, size=3)
+    dv_smoothed = ndimage.gaussian_filter(dv_smoothed, sigma=1)
+    dv_smoothed[~mask] = np.nan
+    dv_smoothed *= dt*1000
+    
+    return hm_smoothed, dv_smoothed
+
+def remove_nans(img, kernel_size=3):
+    """ Replace NaNs in a 2D image with an average of surrounding values
+    """
+    convinput = np.copy(img)
+    convinput[np.isnan(img)] = 0
+    kernel = np.ones((kernel_size,kernel_size))/(kernel_size**2-1)
+    kernel[kernel_size//2,kernel_size//2] = 0
+    nans_removed = np.copy(img)
+    nans_removed[np.isnan(img)] = ndimage.convolve(convinput,kernel)[np.isnan(img)]
+    return nans_removed
+    
 
 def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
     """ Use local polynomial fitting strategy from Bayley et al. 1998 to determine velocity from activation map
@@ -559,7 +595,9 @@ def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
     coords = np.array([Y.ravel(), X.ravel()]).T
     Tsmoothed = np.ones_like(activation_times)*np.nan
     residuals = np.ones_like(activation_times)*np.nan
+    # Note v = (v_y, v_x), consistent with row and column convention
     v = np.ones((2, activation_times.shape[0], activation_times.shape[1]))*np.nan
+    
     for y,x in coords:
         # if np.isnan(activation_times[y, x]):
         #     continue
@@ -584,7 +622,8 @@ def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
             p, res, _, _ = np.linalg.lstsq(A, b)
             Tsmoothed[y,x] = p[5]
             residuals[y,x] = res
-            v[:,y,x] = p[3:5]/(p[3]**2 + p[4]**2)
+            # To make v = (v_y, v_x, flip)
+            v[:,y,x] = np.flip(p[3:5]/(p[3]**2 + p[4]**2))
         except Exception as e:
             pass
     return v, Tsmoothed
@@ -612,39 +651,6 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
         corrected_img = np.divide(raw_img, pbleach[:,np.newaxis,np.newaxis])
         print(corrected_img.shape)
 
-#     elif method == "monoexp":
-#         tpoints = np.arange(img.shape[0])
-#         mean_trace = image_to_trace(img, mask)
-#         def expon(x,a,k, c):
-#             y = a*np.exp(x*k) + c
-#             return(y)
-            
-#         guess_tc = -(np.percentile(mean_trace, 95)/np.percentile(mean_trace,5))/len(mean_trace)
-#         p0 = (np.max(mean_trace)-np.min(mean_trace), guess_tc, np.min(mean_trace))
-#         def fit_x(x):
-#             popt, _ = optimize.curve_fit(expon, tpoints, mean_trace, p0=p0,\
-#                 bounds=([0,-np.inf,0], [np.inf,0,np.inf]))
-#             return popt
-        
-#         smoothed_img = ndimage.gaussian_filter(img, sigma=(0,2,2))
-#         params = np.apply_along_axis(fit_x, 0, smoothed_img)
-        
-#         fig1, ax1 = plt.subplots(figsize=(6,6))
-#         ax1.scatter(tpoints,mean_trace, s=0.8, alpha=0.5)
-#         ax1.plot(tpoints, popt[0]*np.exp(popt[1]*tpoints) + popt[2], color="red")
-#         ax1.text(10, popt[2] + popt[0],\
-#                  "%.2E exp(%.2E t) + %.2E" % (popt[0], popt[1], popt[2]))
-        
-#         background_level = np.mean(img[-10:], axis=0)
-#         if mask is None:
-#             offset = background_level/np.mean(background_level)*popt[2]
-#         else:
-#             offset = background_level/np.mean(background_level[mask])*popt[2]
-            
-#         corrected_img = (img.astype(float) - popt[2])/np.exp(tpoints*popt[1])[:,np.newaxis,np.newaxis] + popt[2]
-#         if invert:
-#             corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
-            
     elif method == "monoexp":
         mean_trace = image_to_trace(img, mask)
         background_level = np.percentile(img, 5)
@@ -673,20 +679,15 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
             corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
     elif method == "decorrelate":
         # Zero the mean over time
-        mean_img = img.mean(axis=0)
-        t_zeroed = img - mean_img
-        data_matrix = t_zeroed.reshape((t_zeroed.shape[0], -1))
-
-        # correlate to mean trace
-        mean_trace = data_matrix.mean(axis=1)
-        corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
-        resids = data_matrix - np.outer(mean_trace, corr)
+        # mean_img = img.mean(axis=0)
+        mean_trace = img.mean(axis=(1,2))
+        corrected_img = regress_video(img, mean_trace)
         
-        corrected_img = mean_img + resids.reshape(img.shape)
     else:
         raise ValueError("Not Implemented")
         
     return corrected_img
+    
 
 def get_image_dFF(img, baseline_percentile=10):
     """ Convert a raw image into dF/F
@@ -829,50 +830,44 @@ def get_image_dff_corrected(img, nsamps_corr, mask=None, plot=None, full_output=
         return dFF_img
     
     
-def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, savedir=None, prom_pct=90, sta_bounds="auto", aa=True, dff_time_downsample=1, exclude_pks = None, offset=0):
+def image_to_sta(raw_img, fs=1, mask=None, plot=False, \
+                 savedir=None, prom_pct=90, sta_bounds="auto", \
+                 exclude_pks = None, offset=0, full_output=False):
     """ Convert raw image into spike triggered average
     """
     if savedir is not None:
         os.makedirs(savedir, exist_ok=True)
 
     if plot:
-        fig1, axes = plt.subplots(2,3, figsize=(15,10))
+        fig1, axes = plt.subplots(2,2, figsize=(10,10))
         axes = axes.ravel()
 
-    # Downsample
-    di = downsample_video(raw_img, downsample_factor, aa=aa)
-    print("Downsample complete")
-    dFF_img, mask = get_image_dff_corrected(di, 111, plot=axes[0], full_output=True)
-    raw_trace = image_to_trace(di, np.tile(mask, (di.shape[0], 1, 1)))
+    # Generate mask if not provided
+    mean_img = raw_img.mean(axis=0)
+    if mask is None:
+        mask = mean_img > np.percentile(mean_img, 80)
+        kernel_size = int(mask.shape[0]/50)
+        mask = morphology.binary_closing(mask, selem=np.ones((kernel_size, kernel_size)))
+    _ = visualize.display_roi_overlay(mean_img, mask.astype(int), ax=axes[0])
     
-    ss = StandardScaler()
-    rd, gc = get_region_data(dFF_img, np.ones((dFF_img.shape[1], dFF_img.shape[2])), 1)
-    rd = ss.fit_transform(rd)
-    pca_full = PCA(n_components=5)
-    pca_full.fit(rd)
-    pca_img = generate_cropped_region_image(pca_full.components_[0], gc)
+    raw_trace = image_to_trace(raw_img, np.tile(mask, (raw_img.shape[0], 1, 1)))
     
-
-    dFF_mean = image_to_trace(dFF_img, mask=np.tile(mask, (di.shape[0], 1, 1)))
-
+    # convert to DF/F
+    
+    dFF_img = get_image_dFF(raw_img)
+    
     if savedir:
-        if dff_time_downsample > 1:
-            skio.imsave(os.path.join(savedir, "dFF.tif"), transform.downscale_local_mean(raw_img, (dff_time_downsample,1,1)))
-        else:
-            skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img)
-        skio.imsave(os.path.join(savedir, "pca.tif"), pca_img)
-        np.savez(os.path.join(savedir, "dFF_mean.npz"), dFF_mean=dFF_mean)
-    
+        skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img)
+
+    dFF_mean = image_to_trace(dFF_img, mask=np.tile(mask, (dFF_img.shape[0], 1, 1)))
+
     # Identify spikes
     ps = np.percentile(dFF_mean,[10,prom_pct])
     prominence = ps[1] - ps[0]
-    pks, _ = signal.find_peaks(dFF_mean, prominence=prominence)
-    
-    if len(pks) == 0:
-        return None
+    pks, _ = signal.find_peaks(dFF_mean, prominence=prominence, width=(50, None))
     
     if exclude_pks:
-        keep = np.ones(len(pks))
+        keep = np.ones(len(pks), dtype=bool)
         keep[exclude_pks] = 0
         pks = pks[keep]
 
@@ -884,25 +879,26 @@ def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, save
         tx = axes[1].twinx()
         tx.plot(np.arange(dFF_img.shape[0])/fs, raw_trace, color="C1")
         tx.set_ylabel("Mean counts")
-        axes[2].imshow(pca_img)
 
     # Automatically determine bounds for spike-triggered average
     if sta_bounds == "auto":
-        # Align all detected peaks of the full trace and take the mean
         try:
+        # Align all detected peaks of the full trace and take the mean
             aligned_traces = traces.align_fixed_offset(np.tile(dFF_mean, (len(pks), 1)), pks)
         except Exception as e:
+            print(e)
             return raw_trace
         mean_trace = np.nanmean(aligned_traces, axis=0)
         # Smooth
-        spl = interpolate.UnivariateSpline(np.arange(len(mean_trace)), np.nan_to_num(mean_trace, nan=np.nanmin(mean_trace)), s=0.001)
+        spl = interpolate.UnivariateSpline(np.arange(len(mean_trace)), \
+                                np.nan_to_num(mean_trace, nan=np.nanmin(mean_trace)), s=0.001)
         smoothed = spl(np.arange(len(mean_trace)))
         smoothed_dfdt = spl.derivative()(np.arange(len(mean_trace)))   
         # Find the first minimum before and the first minimum after the real spike-triggered peak
         if plot:
-            axes[4].plot(mean_trace)
-            axes[4].plot(smoothed, color="C1")
-            tx = axes[4].twinx()
+            axes[3].plot(mean_trace)
+            axes[3].plot(smoothed, color="C1")
+            tx = axes[3].twinx()
             tx.plot(smoothed_dfdt, color="C2")
             tx.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
         try:
@@ -916,7 +912,8 @@ def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, save
         
         if plot:
             axes[3].plot([pks[-1]-b1, pks[-1], pks[-1]+b2], mean_trace[[pks[-1]-b1, pks[-1], pks[-1]+b2]], "rx")
-        
+    else:
+        b1, b2 = sta_bounds
 
 
     # Collect spike traces according to bounds
@@ -938,17 +935,18 @@ def image_to_sta(raw_img, downsample_factor=1, fs=1, mask=None, plot=False, save
     sta = np.nanmean(spike_images, axis=0)
 
     if plot:
-        axes[3].plot(np.arange(b1+b2)/fs, sta_trace)
-        axes[3].set_xlabel("Time (s)")
-        axes[3].set_ylabel(r"$F/F_0$")
-        axes[3].set_title("STA taps: %d + %d" % (b1,b2))
+        axes[2].plot(np.arange(b1+b2)/fs, sta_trace)
+        axes[2].set_xlabel("Time (s)")
+        axes[2].set_ylabel(r"$F/F_0$")
+        axes[2].set_title("STA taps: %d + %d" % (b1,b2))
         plt.tight_layout()
     if savedir:
         skio.imsave(os.path.join(savedir, "sta.tif"), sta)
         if plot:
             plt.savefig(os.path.join(savedir, "QA_plots.tif"))
+    if full_output:
+        return sta, spike_images
     return sta
-
 
 def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=True, band_bounds=(0.1, 2), \
                    band_threshold=0.45, full_output=False, opening_size=5, dilation_size=15, f_s=1, \
