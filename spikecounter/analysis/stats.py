@@ -101,79 +101,27 @@ def gen_exptdata(freq_trace, cov_trace, plot=False, n_points_offset=0, min_windo
     xvals = np.arange(len(covdata))
     return covdata, finterp, xvals, last_nan_before_cov
 
-def gen_minfun(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_factor, rel_weight=1):
-    """ Generate function to be minimized in nonlinear optimization.
-    """
+def gen_fitfun(xvals_sim, f_sim, cv_sim, x_offset_pre, x_offset_post, scale_factors, relweight=1):
+    ### Here covdata and fdata are Nx2 arrays of the experimental data
+    
     ccov = correct_cov(cv_sim, xvals_sim)
     
-    # Generate lookup functions for simulated traces
     f_lookup = interpolate.interp1d(xvals_sim, f_sim, fill_value="extrapolate")
     cov_lookup = interpolate.interp1d(xvals_sim, ccov, fill_value="extrapolate")
 
-    # Define function to be minimized
-    def minfun(x):
-        try:
-            # Squared difference between simulated and experimental values. Hard-coded scale factor in x as an order of magnitude estimate to make individual optimization steps better behaved.
-            sim_freq_values = f_lookup(xvals_data/scale_factor/x[0] - x[1])
-            sim_cov_values = cov_lookup(xvals_data/scale_factor/x[0] - x[1])
-            cost = (np.sum(np.power(sim_freq_values - f_data*x[2], 2)) \
-                + rel_weight*np.sum(np.power(sim_cov_values - cov_data, 2)))/len(xvals_data)
-        except Exception as e:
-            print(xvals.shape)
-            print(fdata.shape)
-            print(covdata.shape)
-            raise e
-        return cost
-    return minfun, f_lookup, cov_lookup
-
-def gen_minfun_inc_nans(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_factor, rel_weight=1):
-    """ Generate function to be minimized in nonlinear optimization.
-    """
-    ccov = correct_cov(cv_sim, xvals_sim)
-    
-    # Generate lookup functions for simulated traces
-    f_lookup = interpolate.interp1d(xvals_sim, f_sim, fill_value="extrapolate")
-    cov_lookup = interpolate.interp1d(xvals_sim, ccov, fill_value="extrapolate")
-
-    # Define function to be minimized
-    def minfun(x):
-        try:
-            # Squared difference between simulated and experimental values. Hard-coded scale factor in x as an order of magnitude estimate to make individual optimization steps better behaved.
-            nanmask_f = np.isnan(f_data)
-            nanmask_cv = np.isnan(cov_data)
-            
-            sim_freq_values = f_lookup((xvals_data[~nanmask_f]- x[1])/scale_factor/x[0] + 1)
-            sim_cov_values = cov_lookup((xvals_data[~nanmask_cv] - x[1])/scale_factor/x[0] + 1)
-            cost = np.sum(np.power(sim_freq_values - f_data[~nanmask_f]*x[2], 2))/np.sum(~nanmask_f) \
-                + rel_weight*np.sum(np.power(sim_cov_values - cov_data[~nanmask_cv], 2))/np.sum(~nanmask_cv)
-        except Exception as e:
-            print(xvals.shape)
-            print(fdata.shape)
-            print(covdata.shape)
-            raise e
-        return cost
-    return minfun, f_lookup, cov_lookup
-
-
-
-def gen_minfun_freq_only(xvals_sim, f_sim, cv_sim, xvals_data, f_data, cov_data, scale_factor):
-    """ Generate function for fitting frequency in nonlinear optimization 
-    """
-    # Generate lookup functions for simulated traces
-    ccov = correct_cov(cv_sim, xvals_sim)
-    f_lookup = interpolate.interp1d(xvals_sim, f_sim, fill_value="extrapolate")
-    cov_lookup = interpolate.interp1d(xvals_sim, ccov, fill_value="extrapolate")
-    def minfun(x):
-        try:
-            # Squared difference between simulated and experimental values. Hard-coded scale factor in x as an order of magnitude estimate to make individual optimization steps better behaved.
-            sim_values = f_lookup(xvals_data/scale_factor/x[0] - x[1])
-            cost = np.sum(np.power((sim_values - f_data*x[2])/sim_values, 2))/len(xvals_data)
-        except Exception as e:
-            print(xvals.shape)
-            print(fdata.shape)
-            raise e
-        return cost
-    return minfun, f_lookup, cov_lookup
+    def fit_function(params, x=None, dat1=None, dat2=None):
+        freq_valid = ~np.isnan(dat1)
+        cov_valid = ~np.isnan(dat2)
+        x_valid_freq = x[freq_valid]
+        x_valid_cov = x[cov_valid]
+        model1 = f_lookup(params['x_scale']/scale_factors[0]*(x_valid_freq-x_offset_pre) +\
+                          params['x_offset']/scale_factors[2]-x_offset_post)
+        model2 = cov_lookup(params['x_scale']/scale_factors[0]*(x_valid_cov-x_offset_pre) +\
+                            params['x_offset']/scale_factors[2]-x_offset_post)
+        resid1 = (params['amplitude']/scale_factors[1]*dat1[freq_valid] - model1)
+        resid2 = (dat2[cov_valid] - model2)*relweight
+        return np.concatenate((resid1, resid2))
+    return fit_function, f_lookup, cov_lookup
 
 def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold=0):
     """ SVD a data matrix and reconstruct using the first n singular components
@@ -216,3 +164,28 @@ def trajectory_variability_kde(x, y, nsamples=100, bandwidth=1, pady=0):
     std_y = np.sqrt(var_y)
     
     return x_samples, mean_y, std_y
+
+
+def multi_regress(data_matrix, traces, regress_dc=True):
+    """
+    data_matrix : t by x matrix
+    traces: n by t matrix
+    """
+    if len(traces.shape) == 1:
+        tr = traces[np.newaxis,:]
+    else:
+        tr = traces
+        
+    if regress_dc:
+        I = np.concatenate([np.ones((1,data_matrix.shape[0])), tr-tr.mean(axis=1)], axis=0)
+    else:
+        I = tr
+    
+    C = data_matrix.T @ I.T @ np.linalg.inv(I @ I.T)
+    resid = data_matrix - (C @ I).T
+    
+    if regress_dc:
+        dc = np.outer(I[0,:], C[:,0])
+    else:
+        dc = np.zeros_like(data_matrix)
+    return dc + resid
