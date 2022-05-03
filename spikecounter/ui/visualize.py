@@ -44,7 +44,7 @@ def tile_plots_conditions(condition_list, subplot_size, disp_titles=True):
             axes[idx].set_title(c)
     return fig1, axes
 
-def plot_scalebars(ax, scalebar_params, pct_f=False):
+def plot_scalebars(ax, scalebar_params, time_unit="s", pct_f=False):
     """ Plot ephys style scalebars
     """
     
@@ -72,7 +72,7 @@ def plot_scalebars(ax, scalebar_params, pct_f=False):
         f_label = r"$%.2f\Delta F/F$" % scalebar_params["ampl_scale"]
     print(f_label)
     
-    ax.text(scalebar_params["corner_x"] + xlabel_offset_x, scalebar_params["corner_y"] + xlabel_offset_y, "%ds" % scalebar_params["time_scale"], size=scalebar_params["fontsize"])
+    ax.text(scalebar_params["corner_x"] + xlabel_offset_x, scalebar_params["corner_y"] + xlabel_offset_y, "%d%s" % (scalebar_params["time_scale"], time_unit), size=scalebar_params["fontsize"])
     ax.text(scalebar_params["corner_x"] + ylabel_offset_x, scalebar_params["corner_y"] + ylabel_offset_y - scalebar_params["ampl_scale"], \
             f_label, size=scalebar_params["fontsize"], rotation=90)
     ax.add_patch(r1)
