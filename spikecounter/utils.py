@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from ipywidgets import interact
 from scipy import interpolate
 import re
+import pandas as pd
 
 def shiftkern(kernel, a, b, c, dt):
     """ From Hochbaum and Cohen 2012
@@ -48,6 +49,24 @@ def process_experiment_metadata(expt_metadata, regexp_dict={}):
         new_df[key] = matches
     
     return new_df
+
+def match_experiments_to_snaps(expt_data, snap_data):
+    snap_files = []
+    snap_data_by_embryo = snap_data.set_index("embryo")    
+    for i in range(expt_data.shape[0]):
+        try:
+            embryo_snap_data = snap_data_by_embryo.loc[[str(expt_data.iloc[i]["embryo"])]]
+            start_time = datetime.strptime(expt_data.iloc[i]["start_time"], "%H:%M:%S")
+            # print(embryo_snap_data[["start_time"]])
+            snap_times = [datetime.strptime(t, "%H:%M:%S") for t \
+                          in list(embryo_snap_data["start_time"].values.ravel())]
+            diffs = [abs(start_time - t).seconds for t in snap_times]
+            snap_idx = np.argmin(diffs)
+            snap_files.append(embryo_snap_data["file_name"].iloc[snap_idx])
+        except KeyError:
+            snap_files.append(None)
+    return pd.concat([expt_data, pd.DataFrame(snap_files, columns=["snap_file"])], axis=1)
+    # expt_data["snap_file"] = snap_files
     
 
 def generate_file_list(input_path):
@@ -287,3 +306,14 @@ def align_traces(unaligned_traces, all_index_offsets):
             curr_row +=1
     global_time = np.arange(aligned_traces.shape[1]) - max_offset
     return aligned_traces, global_time
+
+def div(x):
+    """ Calculate divergence of a N-D vector field in Cartesian coordinates
+    """
+    diag_derivs = []
+    for i in range(x.shape[0]):
+        dxi = np.gradient(x[i])
+        diag_derivs.append(dxi[i])
+    divergence = np.sum(np.array(diag_derivs), axis=0)
+    
+    return divergence
