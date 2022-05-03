@@ -25,27 +25,30 @@ for p in sorted(os.listdir(".")):
                 failed_jobs.append(res[0])
                 causes.append("mem")
 failed_jobs = set(failed_jobs)
+# print(failed_jobs)
 failed_job_lines = []
 print(causes)
 line_counter = 0
 line_counter2 = 0
-if exec == 1:
-    with open(filepath, "r") as jobs_file:
-        for l in jobs_file:
-            res = search("job {:d}", l)
-            if res is not None:
-                if res[0] in failed_jobs:
-                    failed_job_lines.append(line_counter)
-                    failed_jobs.remove(res[0])
-                line_counter +=1
-            elif "sbatch" in l:
-                if len(failed_job_lines) == 0:
-                    break 
-                if line_counter2 == 0:
-                    print(failed_job_lines)
-                    print(len(failed_job_lines))
-                if line_counter2 == failed_job_lines[0]:
-                    print(l)
+
+with open(filepath, "r") as jobs_file:
+    for l in jobs_file:
+        res = search("job {:d}", l)
+        if res is not None:
+            if res[0] in failed_jobs:
+                failed_job_lines.append(line_counter)
+                failed_jobs.remove(res[0])
+                # print(failed_jobs)
+            line_counter +=1
+        elif "sbatch" in l:
+            if len(failed_job_lines) == 0:
+                break 
+            if line_counter2 == 0:
+                print(failed_job_lines)
+                print(len(failed_job_lines))
+            if line_counter2 == failed_job_lines[0]:
+                print(l)
+                failed_job_lines = failed_job_lines[1:]
+                if args.exec == 1:
                     subprocess.run(ast.literal_eval(l))
-                    failed_job_lines = failed_job_lines[1:]
-                line_counter2 +=1
+            line_counter2 +=1
