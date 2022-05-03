@@ -34,6 +34,8 @@ parser.add_argument("--invert", default=0, type=int)
 parser.add_argument("--lpad", default=0, type=int)
 parser.add_argument("--rpad", default=0, type=int)
 parser.add_argument("--fs", default=10.2, type=float)
+parser.add_argument("--decorrelate", default=True, type=bool)
+parser.add_argument("--decorr_pct", default="None")
 
 def generate_invalid_frame_indices(stim_trace, dt_frame):
     invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
@@ -92,11 +94,20 @@ else:
 
 if crosstalk_channel =="None":
     mean_img = downsampled.mean(axis=0)
-    data_matrix = downsampled.reshape(downsampled.shape[0], -1)
-    mean_trace = data_matrix.mean(axis=1)
-    corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
-    resids = data_matrix - np.outer(mean_trace, corr)
-    stim_frames_removed = mean_img + resids.reshape(downsampled.shape)
+    # data_matrix = downsampled.reshape(downsampled.shape[0], -1)
+    # mean_trace = downsampled.mean(axis=(1,2))
+    # corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
+    # resids = data_matrix - np.outer(mean_trace, corr)
+    # stim_frames_removed = mean_img + resids.reshape(downsampled.shape)
+    if args.decorrelate:
+        if args.decorr_pct == "None":
+            decorr_trace = downsampled.mean(axis=(1,2))
+        else:
+            cutoff = np.percentile(mean_img, float(args.decorr_pct))
+            decorr_trace = downsampled[:,mean_img<cutoff].mean(axis=1)
+        stim_frames_removed = images.regress_video(downsampled, decorr_trace, regress_dc=False) + mean_img
+    else:
+        stim_frames_removed = downsampled
     skio.imsave(os.path.join(output_folder, "stim_frames_removed", "%s.tif" % expt_name), stim_frames_removed)
 else:
     try:
@@ -111,21 +122,33 @@ else:
         if args.rpad > 0:
             for i in range(args.rpad+1):
                 invalid_mask[invalid_indices+i] = True
-
-        mean_img = downsampled[~invalid_mask].mean(axis=0)
-        data_matrix = downsampled.reshape(downsampled.shape[0], -1)
-        mean_trace = data_matrix.mean(axis=1)
-        corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
-        resids = data_matrix - np.outer(mean_trace, corr)
         
-        stim_frames_removed = images.interpolate_invalid_values(mean_img + resids.reshape(downsampled.shape), invalid_mask)
+        stim_frames_removed = images.interpolate_invalid_values(downsampled, invalid_mask)
+        mean_img = stim_frames_removed.mean(axis=0)
+        if args.decorrelate:
+            if args.decorr_pct == "None":
+                decorr_trace = stim_frames_removed.mean(axis=(1,2))
+            else:
+                cutoff = np.percentile(mean_img, float(args.decorr_pct))
+                decorr_trace = stim_frames_removed[:,mean_img<cutoff].mean(axis=1)
+            stim_frames_removed = images.regress_video(stim_frames_removed, decorr_trace, regress_dc=False) + mean_img
+        else:
+            stim_frames_removed = downsampled
+        
+#         mean_img = downsampled[~invalid_mask].mean(axis=0)
+#         data_matrix = downsampled.reshape(downsampled.shape[0], -1)
+#         mean_trace = data_matrix.mean(axis=1)
+#         corr = np.matmul(data_matrix.T, mean_trace)/np.dot(mean_trace, mean_trace)
+#         resids = data_matrix - np.outer(mean_trace, corr)
+        
+#         stim_frames_removed = images.interpolate_invalid_values(mean_img + resids.reshape(downsampled.shape), invalid_mask)
         skio.imsave(os.path.join(output_folder, "stim_frames_removed", "%s.tif" % expt_name), stim_frames_removed)
     except Exception:
         stim_frames_removed = downsampled
         skio.imsave(os.path.join(output_folder, "stim_frames_removed", "%s.tif" % expt_name), stim_frames_removed)
 
 
-
+mean_img = stim_frames_removed.mean(axis=0)
 # Correct photobleach
 nsamps = (int(2.5*fs)//2)*2 +1
 mask = mean_img > np.percentile(mean_img, 70)

@@ -10,7 +10,6 @@ function metadata_to_py(folder)
     camera = load_device_data(Device_Data, "Main Camera");
     dmd_lightcrafter = load_device_data(Device_Data, "DMD_lightcrafter");
     confocal_output_data = load_device_data(Device_Data, "BU_2P");
-    disp(confocal_output_data);
     dd_compat_py = struct;
     if ~isempty(confocal_output_data) && ~isempty(confocal_output_data.outputdata)
         disp(confocal_output_data.outputdata);
