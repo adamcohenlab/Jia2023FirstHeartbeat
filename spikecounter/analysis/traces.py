@@ -254,8 +254,9 @@ def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
     for pk_idx, pk in enumerate(peak_indices):
         before_pad_length = max(before - pk, 0)
         after_pad_length = max(0, pk+after - len(trace))
+        spike_trace = trace[max(0, pk-before):min(len(trace),pk+after)]
         spike_trace = np.concatenate([np.ones(before_pad_length)*np.nan,
-                                                trace[max(0, pk-before):min(len(trace),pk+after)],
+                                                spike_trace-np.min(spike_trace),
                                         np.ones(after_pad_length)*np.nan])
         spike_traces[pk_idx,:] = spike_trace
     if normalize_height:
