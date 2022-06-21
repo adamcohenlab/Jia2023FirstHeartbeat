@@ -30,12 +30,21 @@ def get_line_labels(lns):
     """
     return [l.get_label() for l in lns]
 
-def tile_plots_conditions(condition_list, subplot_size, disp_titles=True):
+def tile_plots_conditions(condition_list, subplot_size, n_rows = None, disp_titles=True):
     """ Generate subplots for the same graph over a large number of conditions
     INCOMPLETE
     """
-    n_rows = int(np.ceil(np.sqrt(len(condition_list))))
-    fig1, axes = plt.subplots(n_rows, n_rows, figsize=(subplot_size[0]*n_rows, subplot_size[1]*n_rows))
+    n_plots = len(condition_list)
+    if n_rows is None:
+        n_rows = int(np.ceil(np.sqrt(n_plots)))
+        if n_plots% n_rows == 0:
+            n_cols = n_plots//n_rows
+        else:
+            n_cols = n_plots//n_rows + 1
+    else:
+        n_cols = n_plots//n_rows
+    
+    fig1, axes = plt.subplots(n_rows, n_cols, figsize=(subplot_size[0]*n_cols, subplot_size[1]*n_rows))
     if n_rows ==1:
         axes = np.array([axes])
     axes = axes.ravel()
@@ -53,7 +62,7 @@ def plot_scalebars(ax, scalebar_params, time_unit="s", pct_f=False):
     ylim = ax.get_ylim()
     bbox = ax.get_window_extent()
     aspect = np.abs(xlim[0] - xlim[1])/np.abs(ylim[0] - ylim[1])*bbox.height/bbox.width
-    ampl_scale = np.round(scalebar_params["ampl_scale"], decimals=2)
+    ampl_scale = scalebar_params["ampl_scale"]
 
     r1 = patches.Rectangle((scalebar_params["corner_x"], scalebar_params["corner_y"]), \
                            scalebar_params["time_scale"], scalebar_params["thickness"], color="black")
@@ -65,11 +74,13 @@ def plot_scalebars(ax, scalebar_params, time_unit="s", pct_f=False):
     xlabel_offset_y = scalebar_params["xlabel_offset_y"]
     ylabel_offset_y = scalebar_params["ylabel_offset_y"]
     ylabel_offset_x = scalebar_params["ylabel_offset_x"]
-    
-    if pct_f:
-        f_label = r"$%d\%%F$" % (np.round(scalebar_params["ampl_scale"]*100))
+    if "ylabel" in scalebar_params:
+        f_label = scalebar_params["ylabel"] % scalebar_params["ampl_scale"]
     else:
-        f_label = r"$%.2f\Delta F/F$" % scalebar_params["ampl_scale"]
+        if pct_f:
+            f_label = r"$%d\%%F$" % (np.round(scalebar_params["ampl_scale"]*100))
+        else:
+            f_label = r"$%.2f\Delta F/F$" % scalebar_params["ampl_scale"]
     print(f_label)
     
     ax.text(scalebar_params["corner_x"] + xlabel_offset_x, scalebar_params["corner_y"] + xlabel_offset_y, "%d%s" % (scalebar_params["time_scale"], time_unit), size=scalebar_params["fontsize"])
@@ -131,14 +142,18 @@ def plot_img_scalebar(fig, ax, x0, y0, length_um, thickness_px, pix_per_um = 1, 
         tx.set_position((x0_text, y0_text))
         plt.draw()
         
-def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsize=(12,4), trace_color="C1", stim_color="blue", scale="axis", scalebar_params=None, axis=None):
+def plot_trace_with_stim_bars(trace, stims, start_y, width, height, t=None, figsize=(12,4), trace_color="C1", stim_color="blue", scale="axis", scalebar_params=None, axis=None):
     """ Plot a trace with rectangles indicating stimulation
     """
     if axis is None:
         fig1, ax1 = plt.subplots(figsize=(12,4))
     else:
         ax1 = axis
-    ax1.plot(np.arange(len(trace))*dt, trace, color=trace_color)
+        fig1 = ax1.get_figure()
+    if t is None:
+        ax1.plot(np.arange(len(trace)), trace, color=trace_color)
+    else:
+        ax1.plot(t, trace, color=trace_color)
     for st in stims:
         r = patches.Rectangle((st, start_y), width, height, color=stim_color)
         ax1.add_patch(r)

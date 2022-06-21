@@ -7,6 +7,7 @@ from ipywidgets import interact
 from scipy import interpolate
 import re
 import pandas as pd
+import mat73
 
 def shiftkern(kernel, a, b, c, dt):
     """ From Hochbaum and Cohen 2012
@@ -27,6 +28,26 @@ def extract_experiment_name(input_path):
         expt_name = folder_names[-1]
     expt_name = expt_name.split(".tif")[0]
     return expt_name
+
+def load_experiment_metadata(rootdir, expt_name):
+    if os.path.exists(os.path.join(rootdir, expt_name, "output_data_py.mat")):
+        try:
+            expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
+        except Exception as e:
+            print(e)
+            expt_data = None
+    elif os.path.exists(os.path.join(rootdir, expt_name, "experimental_parameters.txt")):
+        try:
+            expt_data = {"camera": {"roi":[0,0,0,0]}}
+            with open(os.path.join(rootdir, expt_name, "experimental_parameters.txt"), "r") as f:
+                expt_data["camera"]["roi"][1] = int(re.search("\d+", f.readline()).group(0))
+                expt_data["camera"]["roi"][3] = int(re.search("\d+", f.readline()).group(0))
+        except Exception as e:
+            print(e)
+            expt_data = None
+    else:
+        expt_data = None
+    return expt_data
 
 def process_experiment_metadata(expt_metadata, regexp_dict={}):
     """ Extract data from filenames in basic metadata DF
@@ -63,7 +84,8 @@ def match_experiments_to_snaps(expt_data, snap_data):
             diffs = [abs(start_time - t).seconds for t in snap_times]
             snap_idx = np.argmin(diffs)
             snap_files.append(embryo_snap_data["file_name"].iloc[snap_idx])
-        except KeyError:
+        except KeyError as e:
+            # print(e)
             snap_files.append(None)
     return pd.concat([expt_data, pd.DataFrame(snap_files, columns=["snap_file"])], axis=1)
     # expt_data["snap_file"] = snap_files
@@ -263,10 +285,21 @@ def traces_to_dict(matdata):
     for trace_type in trace_types:
         traces = trace_type["traces"]
         if isinstance(traces["name"], str):
-            dt_dict[traces["name"]] = traces["values"][rising_edges]
+            dt_dict[traces["name"]] = np.zeros_like(rising_edges, dtype=float)
+
+            for j in range(len(rising_edges)):
+                if j == 0:
+                    dt_dict[traces["name"]][j] = np.max(traces["values"][:rising_edges[j]])
+                else:
+                    dt_dict[traces["name"]][j] = np.max(traces["values"][rising_edges[j-1]:rising_edges[j]])
         else:
             for i in range(len(traces["name"])):
-                dt_dict[traces["name"][i]] = traces["values"][i][rising_edges]
+                dt_dict[traces["name"][i]] = np.zeros_like(rising_edges, dtype=float)
+                for j in range(len(rising_edges)-1):
+                    if j == 0:
+                        dt_dict[traces["name"][i]][j] = np.max(traces["values"][i][:rising_edges[j]])
+                    else:
+                        dt_dict[traces["name"][i]][j] = np.max(traces["values"][i][rising_edges[j-1]:rising_edges[j]])
     t = rising_edges/matdata["clock_rate"]
     return dt_dict, t
 
@@ -317,3 +350,12 @@ def div(x):
     divergence = np.sum(np.array(diag_derivs), axis=0)
     
     return divergence
+
+def closest_non_zero(arr):
+    nonzeros = np.argwhere(arr!=0)
+#     print(nonzeros)
+#     print(nonzeros.shape)
+    distances = np.abs(np.subtract.outer(np.arange(len(arr), dtype=int), nonzeros)).reshape((len(arr), -1))
+#     print(distances.shape)
+    min_indices = np.argmin(distances, axis=1)
+    return nonzeros[min_indices]
