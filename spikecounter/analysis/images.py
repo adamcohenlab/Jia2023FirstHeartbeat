@@ -48,21 +48,7 @@ def load_image(rootdir, expt_name, subfolder="", raw=True):
     
     all_files = os.listdir(d)
     expt_files = 0
-    if os.path.exists(os.path.join(rootdir, expt_name, "output_data_py.mat")):
-        try:
-            expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
-        except Exception:
-            print(e)
-            expt_data = None
-    elif os.path.exists(os.path.join(rootdir, expt_name, "experimental_parameters.txt")):
-        try:
-            expt_data = {"camera": {"roi":[0,0,0,0]}}
-            with open(os.path.join(rootdir, expt_name, "experimental_parameters.txt"), "r") as f:
-                expt_data["camera"]["roi"][1] = int(re.search("\d+", f.readline()).group(0))
-                expt_data["camera"]["roi"][3] = int(re.search("\d+", f.readline()).group(0))
-        except Exception as e:
-            print(e)
-            expt_data = None
+    expt_data = utils.load_experiment_metadata(rootdir, expt_name)
 
     if raw:
         try:
@@ -532,7 +518,7 @@ def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
     smoothed_vid = np.moveaxis(smoothed_vid.reshape((img.shape[1], img.shape[2],-1)), 2, 0)
     return beta, smoothed_vid
 
-def process_isochrones(beta, dt, threshold=None, plot=False):
+def process_isochrones(beta, dt, threshold=None, plot=False, med_filt_size=3):
     """ Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude values 
     """
     amplitude = beta[2,:,:]
@@ -545,8 +531,8 @@ def process_isochrones(beta, dt, threshold=None, plot=False):
         
     # thresh = filters.threshold_otsu(amplitude_nanr)
     mask = amplitude_nanr>threshold
-    mask = morphology.binary_opening(mask, selem=morphology.disk(2))
-    mask = morphology.binary_closing(mask, selem=morphology.disk(2))
+    mask = morphology.binary_opening(mask, selem=morphology.disk(3))
+    mask = morphology.binary_closing(mask, selem=morphology.disk(3))
     
     labels = measure.label(mask)
     label_values, counts = np.unique(labels, return_counts=True)
@@ -564,12 +550,12 @@ def process_isochrones(beta, dt, threshold=None, plot=False):
     hm_nans_removed = remove_nans(hm)
     dv_nans_removed = remove_nans(dv)
     
-    hm_smoothed = ndimage.median_filter(hm_nans_removed, size=3)
+    hm_smoothed = ndimage.median_filter(hm_nans_removed, size=med_filt_size)
     hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1)
     hm_smoothed[~mask] = np.nan
     hm_smoothed *= dt*1000
     
-    dv_smoothed = ndimage.median_filter(dv_nans_removed, size=3)
+    dv_smoothed = ndimage.median_filter(dv_nans_removed, size=med_filt_size)
     dv_smoothed = ndimage.gaussian_filter(dv_smoothed, sigma=1)
     dv_smoothed[~mask] = np.nan
     dv_smoothed *= dt*1000
@@ -628,7 +614,7 @@ def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
             pass
     return v, Tsmoothed
 
-def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=False):
+def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=False, return_params=False):
     """ Perform photobleach correction on each pixel in an image
     """
     if method == "linear":
@@ -654,29 +640,49 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
     elif method == "monoexp":
         mean_trace = image_to_trace(img, mask)
         background_level = np.percentile(img, 5)
-        tpoints = np.arange(len(mean_trace))
-        def expon(x,a,k, c):
-            y = a*np.exp(x*k) + c
-            return(y)
-        guess_tc = -(np.percentile(mean_trace, 95)/np.percentile(mean_trace,5))/len(mean_trace)
-        p0 = (np.max(mean_trace)-np.min(mean_trace), guess_tc, np.min(mean_trace))
-        popt, _ = optimize.curve_fit(expon, tpoints, mean_trace, p0=p0,\
-            bounds=([0,-np.inf,0], [np.inf,0,np.inf]))
-        fig1, ax1 = plt.subplots(figsize=(6,6))
-        ax1.scatter(tpoints,mean_trace, s=0.8, alpha=0.5)
-        ax1.plot(tpoints, popt[0]*np.exp(popt[1]*tpoints) + popt[2], color="red")
-        ax1.text(10, popt[2] + popt[0],\
-                 "%.2E exp(%.2E t) + %.2E" % (popt[0], popt[1], popt[2]))
+        _, pbleach, params = traces.correct_photobleach(mean_trace,\
+                        method="monoexp", return_params=True, invert=invert)
+        dur = img.shape[0]
+        max_val = np.median(img[:10], axis=0)
+        min_val = np.median(img[-10:], axis=0)
+        amplitude = (max_val - min_val)/(1-np.exp(params[1]*dur))
+        amplitude[~np.isfinite(amplitude)] = 0
+        amplitude = np.maximum(amplitude, 0)
+        amplitude = filters.median(amplitude, selem=morphology.disk(7))
+        # pctile = np.percentile(amplitude, 99)
+        # amplitude[amplitude > pctile] = pctile
         
-        background_level = np.mean(img[-10:], axis=0)
-        if mask is None:
-            offset = background_level/np.mean(background_level)*popt[2]
-        else:
-            offset = background_level/np.mean(background_level[mask])*popt[2]
-            
-        corrected_img = (img.astype(float) - popt[2])/np.exp(tpoints*popt[1])[:,np.newaxis,np.newaxis] + popt[2]
+        corrected_img = img - np.divide(amplitude, params[0], out=np.zeros_like(amplitude), where=params[0]>5e-2)\
+                                        *pbleach[:,np.newaxis,np.newaxis]
+        # if invert:
+        #     corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
+        
+        if return_params:
+            return corrected_img, amplitude
+    elif method == "biexp":
+        
+        mean_trace = image_to_trace(img, mask)
+        background_level = np.percentile(img, 5)
+        _, pbleach, params = traces.correct_photobleach(mean_trace,\
+                        method="biexp", return_params=True, invert=invert)
+        dur = img.shape[0]
+        max_val = np.median(img[:10], axis=0)
+        min_val = np.median(img[-10:], axis=0)
+        amplitude = (max_val - min_val)/(1-np.exp(params[1]*dur))
+        amplitude[~np.isfinite(amplitude)] = 0
+        amplitude = np.maximum(amplitude, 0)
+        amplitude = filters.median(amplitude, selem=morphology.disk(7))
+        pctile = np.percentile(amplitude, 99)
+        amplitude[amplitude > pctile] = pctile
+        
+        corrected_img = img - np.divide(amplitude, params[0], out=np.zeros_like(amplitude), where=params[0]>5e-2)\
+                                        *pbleach[:,np.newaxis,np.newaxis]
+        
+        
         if invert:
             corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
+        if return_params:
+            return corrected_img, amplitude
     elif method == "decorrelate":
         # Zero the mean over time
         # mean_img = img.mean(axis=0)
@@ -1173,15 +1179,6 @@ def filter_by_appearances(linked_vid, unlinked_vid, threshold=1/3):
     
     return filtered_vid
 
-def closest_non_zero(arr):
-    nonzeros = np.argwhere(arr!=0)
-#     print(nonzeros)
-#     print(nonzeros.shape)
-    distances = np.abs(np.subtract.outer(np.arange(len(arr), dtype=int), nonzeros)).reshape((len(arr), -1))
-#     print(distances.shape)
-    min_indices = np.argmin(distances, axis=1)
-    return nonzeros[min_indices]
-
 def fill_missing(vid, threshold=100):
     """ Detect when an ROI drops out of a sequence of movies
     """
@@ -1190,7 +1187,7 @@ def fill_missing(vid, threshold=100):
         roi_sizes.append(np.sum(vid==roi, axis=(1,2)))
     roi_sizes = np.array(roi_sizes)
     below_threshold = roi_sizes < threshold
-    closest_above_threshold = np.apply_along_axis(closest_non_zero, 1, ~below_threshold).squeeze()
+    closest_above_threshold = np.apply_along_axis(utils.closest_non_zero, 1, ~below_threshold).squeeze()
     filled_vid = np.zeros_like(vid)
     for i in range(1, closest_above_threshold.shape[0]+1):
         replaced_vals = vid[closest_above_threshold[i-1],:,:] == i
@@ -1220,3 +1217,22 @@ def get_regularized_mask(img, rois):
     
     return area_regularized_mask
 
+def plot_image_roi_traces(masks, figsize_single=(12,4), img_size=4, t=None, traces=None, image=None):
+    """ traces - optional manual traces
+    """
+    n_rois = masks.shape[0]
+    
+    fig1, axes = plt.subplots(n_rois, 2, figsize=(figsize_single[0], figsize_single[1]*n_rois), \
+                              gridspec_kw={"width_ratios": [figsize_single[0]-img_size, img_size]})
+    if traces is None:
+        traces = np.array([image_to_trace(image, mask[idx]) for idx in range(n_rois)])
+    if t is None:
+        t = traces.shape[1]
+    for idx in range(n_rois):
+        ax = axes[idx,0]
+        ax.plot(t, traces[idx], color="C%d" % idx)
+        axes[idx,1].imshow(masks[idx])
+        axes[idx,1].set_axis_off()
+        
+    plt.tight_layout()
+    return fig1, axes
