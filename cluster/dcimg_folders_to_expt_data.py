@@ -20,7 +20,11 @@ for folder in os.listdir(rootpath):
         print(folder)
         res = search("{hh:2d}{mm:2d}{ss:2d}", folder)
         if res is not None:
-            entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
+            if is_folder:
+                if len(os.listdir(os.path.join(rootpath, folder))) > 0:
+                    entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
+            else:
+                entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
 
 print(entries)
 df = pd.DataFrame(entries, columns=["start_time", "file_name"])
