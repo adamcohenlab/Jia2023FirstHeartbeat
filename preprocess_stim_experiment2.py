@@ -26,6 +26,7 @@ parser.add_argument("--remove_from_start", help="Time indices to trim from start
 parser.add_argument("--remove_from_end", help="Time indices to trim from end", default=0, type=int)
 parser.add_argument("--start_from_downsampled", default=0, type=int)
 parser.add_argument("--pb_correct_method", default="localmin", type=str)
+parser.add_argument("--pb_correct_mask", default="None", type=str)
 parser.add_argument("--filter_skewness", default=1, type=int)
 parser.add_argument("--skewness_threshold", default=2, type=float)
 parser.add_argument("--left_shoulder", default=16,type=float)
@@ -34,7 +35,7 @@ parser.add_argument("--invert", default=0, type=int)
 parser.add_argument("--lpad", default=0, type=int)
 parser.add_argument("--rpad", default=0, type=int)
 parser.add_argument("--fs", default=10.2, type=float)
-parser.add_argument("--decorrelate", default=True, type=bool)
+parser.add_argument("--decorrelate", default=1, type=int)
 parser.add_argument("--decorr_pct", default="None")
 
 def generate_invalid_frame_indices(stim_trace, dt_frame):
@@ -112,6 +113,7 @@ if crosstalk_channel =="None":
 else:
     try:
         invalid_indices = generate_invalid_frame_indices(trace_dict[crosstalk_channel], dt_frame) - remove_from_start
+        # print(invalid_indices)
         invalid_mask = np.zeros(downsampled.shape[0], dtype=bool)
         invalid_indices = invalid_indices[invalid_indices < downsampled.shape[0]]
         invalid_mask[invalid_indices] = True
@@ -133,7 +135,7 @@ else:
                 decorr_trace = stim_frames_removed[:,mean_img<cutoff].mean(axis=1)
             stim_frames_removed = images.regress_video(stim_frames_removed, decorr_trace, regress_dc=False) + mean_img
         else:
-            stim_frames_removed = downsampled
+            pass
         
 #         mean_img = downsampled[~invalid_mask].mean(axis=0)
 #         data_matrix = downsampled.reshape(downsampled.shape[0], -1)
@@ -143,16 +145,22 @@ else:
         
 #         stim_frames_removed = images.interpolate_invalid_values(mean_img + resids.reshape(downsampled.shape), invalid_mask)
         skio.imsave(os.path.join(output_folder, "stim_frames_removed", "%s.tif" % expt_name), stim_frames_removed)
-    except Exception:
+    except Exception as e:
+        print(e)
         stim_frames_removed = downsampled
         skio.imsave(os.path.join(output_folder, "stim_frames_removed", "%s.tif" % expt_name), stim_frames_removed)
 
 
 mean_img = stim_frames_removed.mean(axis=0)
 # Correct photobleach
-nsamps = (int(2.5*fs)//2)*2 +1
-mask = mean_img > np.percentile(mean_img, 70)
-pb_corrected_img = images.correct_photobleach(stim_frames_removed, mask=None, method=args.pb_correct_method,\
+# nsamps = (int(2.5*fs)//2)*2 +1
+nsamps = (int(2*fs)//2)*2 +1
+if args.pb_correct_method == "monoexp" or args.pb_correct_mask == "dynamic":
+    mask = mean_img > np.percentile(mean_img, 70)
+else:
+    mask = None
+
+pb_corrected_img = images.correct_photobleach(stim_frames_removed, mask=mask, method=args.pb_correct_method,\
                                               nsamps=nsamps, invert=args.invert)
 skio.imsave(os.path.join(output_folder, "corrected", "%s.tif" % expt_name), pb_corrected_img)
 
