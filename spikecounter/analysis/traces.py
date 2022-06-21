@@ -57,7 +57,7 @@ def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsiz
         visualize.plot_scalebars(ax1, scalebar_params)
     return fig1, ax1
 
-def correct_photobleach(trace, method="linear", nsamps=None):
+def correct_photobleach(trace, method="linear", nsamps=None, plot=False, return_params=False, invert=False):
     """ Correct trace for photobleaching
     """
     tidx = np.arange(len(trace))
@@ -75,6 +75,69 @@ def correct_photobleach(trace, method="linear", nsamps=None):
         photobleach_padded = np.pad(photobleach, (nsamps-1)//2, mode="mean", stat_length=(nsamps-1)//2)
         photobleach = signal.convolve(photobleach_padded, kernel/nsamps, mode="valid")
         corrected_trace = trace/photobleach
+    elif method == "monoexp":
+        tpoints = np.arange(len(trace))
+        def expon_below(x):
+            y = x[0]*np.exp(tpoints*x[1]) + x[2]
+            cost = np.sum((y - trace)**2 + np.exp(y - trace))
+            return cost
+        def expon_above(x):
+            y = x[0]*np.exp(tpoints*x[1]) + x[2]
+            cost = np.sum((y - trace)**2 + np.exp(trace-y))
+            return cost
+        
+        guess_tc = -(np.percentile(trace, 95)/np.percentile(trace,5))/len(trace)
+        
+        p0 = [np.max(trace)-np.min(trace), guess_tc, np.min(trace)*0.8]
+        if invert:
+            p0[2] = np.max(trace)
+            res = optimize.minimize(expon_above, p0, \
+            bounds=[(0,np.inf),(-np.inf,0),(-np.inf,np.inf)])
+        else:
+            res = optimize.minimize(expon_below, p0, \
+                bounds=[(0,np.inf),(-np.inf,0),(-np.inf,np.inf)])
+        popt = res.x
+        if plot:
+            fig1, ax1 = plt.subplots(figsize=(6,6))
+            ax1.scatter(tpoints,trace, s=0.8, alpha=0.5)
+            ax1.plot(tpoints, popt[0]*np.exp(popt[1]*tpoints) + popt[2], color="red")
+            ax1.text(10, popt[2] + popt[0],\
+                     "%.2E exp(%.2E t) + %.2E" % (popt[0], popt[1], popt[2]))        
+        photobleach = popt[0]*np.exp(tpoints*popt[1])
+        corrected_trace = trace - photobleach
+        if return_params:
+            return corrected_trace, photobleach, popt
+    elif method == "biexp":
+        tpoints = np.arange(len(trace))
+        def expon_below(x):
+            y = x[0]*np.exp(tpoints*x[1]) + x[2]*np.exp(tpoints*x[3]) + x[4]
+            cost = np.sum((y - trace)**2 + 2*np.exp(y - trace))
+            return cost
+        def expon_above(x):
+            y = x[0]*np.exp(tpoints*x[1]) + x[2]*np.exp(tpoints*x[3]) + x[4]
+            cost = np.sum((y - trace)**2 + 2*np.exp(trace - y))
+            return cost
+        guess_tc = -(np.percentile(trace, 95)/np.percentile(trace,5))/len(trace)
+        guess_tc2 = guess_tc*5
+        p0 = [(np.max(trace)-np.min(trace))*0.95, guess_tc, (np.max(trace)-np.min(trace))*0.05, guess_tc2, np.min(trace)*0.8]
+        if invert:
+            p0[4] = np.max(trace)
+            res = optimize.minimize(expon_above, p0, \
+            bounds=[(0,np.inf),(-np.inf,0), (0,np.inf),(-np.inf,guess_tc), (-np.inf,np.inf)])
+        else:
+            res = optimize.minimize(expon_below, p0, \
+                bounds=[(0,np.inf),(-np.inf,0), (0,np.inf),(-np.inf,guess_tc), (-np.inf,np.inf)])
+        popt = res.x
+        if plot:
+            fig1, ax1 = plt.subplots(figsize=(6,6))
+            ax1.scatter(tpoints,trace, s=0.8, alpha=0.5)
+            ax1.plot(tpoints, popt[0]*np.exp(popt[1]*tpoints) + popt[2]*np.exp(popt[3]*tpoints) + popt[4], color="red")
+            ax1.text(10, popt[4] + popt[0] + popt[2],\
+                     "%.2E exp(%.2E t) + %.2E exp(%.2E t) + %.2E" % (popt[0], popt[1], popt[2], popt[3], popt[4]))
+        photobleach = popt[0]*np.exp(tpoints*popt[1]) + popt[2]*np.exp(tpoints*popt[3])
+        corrected_trace = trace - photobleach
+        if return_params:
+            return corrected_trace, photobleach, popt
     else:
         raise ValueError("Not implemented")
     return corrected_trace, photobleach
@@ -673,6 +736,9 @@ class TimelapseArrayExperiment():
                 df["roi"] = roi
                 df["hpf"] = df["t"]/3600 + self.start_hpf
                 dfs.append(df)
+            else:
+                df = pd.DataFrame([(np.nan, np.nan, np.nan, np.nan, np.nan, roi, np.nan)], columns= ["peak_idx", "prominence", "fwhm", "isi", "t", "roi", "hpf"])
+                dfs.append(df)
         self.peaks_data = pd.concat(dfs, axis=0).set_index("roi")
         self.peaks_found = True
 
@@ -821,8 +887,8 @@ class TimelapseArrayExperiment():
             if roi in self.peaks_data.index.unique():
                 roi_peaks = self.peaks_data.loc[roi]
                 peak_indices = roi_peaks["peak_idx"]
-                if len(peak_indices) > 0:
-                    ax.plot(t, self.dFF[roi,:])
+                ax.plot(t, self.dFF[roi,:])
+                if len(np.array([peak_indices])) > 0:
                     ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
             ax.set_xlabel("Time (%s)" % time)
             ax.set_ylabel(r"$\Delta F/F$")
