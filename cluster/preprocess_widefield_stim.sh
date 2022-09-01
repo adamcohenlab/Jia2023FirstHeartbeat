@@ -8,4 +8,4 @@
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 conda init bash
 conda activate bjia
-python3 SpikeCounter/preprocess_widefield_stim_experiment.py $1 $2 --output_folder $3 --remove_from_start $4 --remove_from_end $5 --scale_factor $6 --zsc_threshold $7 --upper $8 --fs $9 --start_from_downsampled ${10} --expected_stim_width ${11} --fallback_mask_path ${12} --n_pcs ${13} --skewness_threshold ${14} --crosstalk_mask ${15}
+python3 SpikeCounter/preprocess_widefield_stim_experiment.py $1 $2 $3 --output_folder $4 --remove_from_start $5 --remove_from_end $6 --scale_factor $7 --zsc_threshold $8 --upper $9 --fs ${10} --start_from_downsampled ${11} --expected_stim_width ${12} --fallback_mask_path ${13} --n_pcs ${14} --skewness_threshold ${15} --crosstalk_mask ${16}

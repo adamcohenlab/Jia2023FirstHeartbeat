@@ -3,7 +3,7 @@ import scipy.ndimage as ndi
 import skimage.io as skio
 from scipy import signal, stats, interpolate, optimize, ndimage
 import matplotlib.pyplot as plt
-from skimage import transform, filters, morphology, measure, draw
+from skimage import transform, filters, morphology, measure, draw, exposure
 from scipy.fft import fft, fftfreq
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -14,6 +14,7 @@ import warnings
 import colorcet as cc
 import seaborn as sns
 import pickle
+import pandas as pd
 from cycler import cycler
 import traceback
 import re
@@ -116,53 +117,13 @@ def load_confocal_image(path, direction="both", extra_offset=2):
     
     else:
         raise Exception("Not implemented")
+        
 def generate_invalid_frame_indices(stim_trace):
     invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
     invalid_indices_camera = np.concatenate((invalid_indices_daq, invalid_indices_daq+1))
     return invalid_indices_camera
 
-def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70):
-    """ Refine manual segmentation to localize the heart using PCA assuming that transients are the largest fluctuations present.
-    Returns cropped region images and masks for each unique region in the global image mask.
-    
-    """
-    def pca_component_select(pca):
-        """ TBD: a smart way to decide the number of principal components. for now just return 1.
-        """
-        n_components = 1
-        selected_components = np.zeros_like(pca.components_[0])
-        fraction_explained_variance = pca.explained_variance_/np.sum(pca.explained_variance_)
-        for comp_index in range(n_components):
-            selected_components = selected_components + pca.components_[comp_index]*fraction_explained_variance[comp_index]        
-        return selected_components
-    
-    region_masks = []
-    region_data, region_pixels = get_all_region_data(img, rois)
-    for region_idx in range(len(region_data)):
-        rd = region_data[region_idx]
-        gc = region_pixels[region_idx]
-        rd_bgsub = rd - np.mean(rd, axis=0)
-        try:
-            pca = PCA(n_components=n_components)
-            pca.fit(rd_bgsub)
-            selected_components = np.abs(pca_component_select(pca))
-        
-            indices_to_keep = selected_components > np.percentile(selected_components, threshold_percentile)
-    #         print(gc.shape)
-    #         print(indices_to_keep.shape)
-            mask = np.zeros((img.shape[1], img.shape[2]), dtype=bool)
-            mask[gc[:,0],gc[:,1]] = indices_to_keep
-        except ValueError as e:
-            roi_indices = np.unique(rois)
-            roi_indices = roi_indices[roi_indices != 0]
-            mask = rois == roi_indices[region_idx]
 
-        selem = np.ones((3,3), dtype=bool)
-        mask = morphology.binary_opening(mask, selem)
-        region_masks.append(mask)
-        
-        
-    return region_masks
 
 def get_all_region_data(img, mask):
     """ Turn all mask regions into pixel-time traces of intensity
@@ -193,20 +154,29 @@ def get_region_data(img, mask, region_index):
 
 def generate_cropped_region_image(intensity, global_coords):
     """ Turn an unraveled list of intensities back into an image based on the bounding box of
-    the specified global coordinates
+    the specified global coordinates.
+    
+    global_coords may be one of two possibilities:
+        1) Original shape of image
+        2) Explicit global coordinates of each measured intensity value
     
     """
-    global_coords_rezeroed = global_coords - np.min(global_coords, axis=0)
-    if len(intensity.shape) == 1:
-        img = np.zeros(np.max(global_coords_rezeroed, axis=0)+1)
-        for idx in range(len(intensity)):
-            px = global_coords_rezeroed[idx,:]
-            img[px[0], px[1]] = intensity[idx]
-    elif len(intensity.shape) == 2:
-        img = np.zeros([intensity.shape[0]] + list(np.max(global_coords_rezeroed, axis=0)+1))
-        for idx in range(intensity.shape[1]):
-            px = global_coords_rezeroed[idx,:]
-            img[:,px[0], px[1]] = intensity[:, idx]
+    if type(global_coords) is tuple:
+        img = intensity.reshape(global_coords)
+    else:
+        global_coords_rezeroed = global_coords - np.min(global_coords, axis=0)
+        if len(intensity.shape) == 1:
+            img = np.zeros(np.max(global_coords_rezeroed, axis=0)+1)
+            for idx in range(len(intensity)):
+                px = global_coords_rezeroed[idx,:]
+                img[px[0], px[1]] = intensity[idx]
+        elif len(intensity.shape) == 2:
+            img = np.zeros([intensity.shape[0]] + list(np.max(global_coords_rezeroed, axis=0)+1))
+            for idx in range(intensity.shape[1]):
+                px = global_coords_rezeroed[idx,:]
+                img[:,px[0], px[1]] = intensity[:, idx]
+        else:
+            raise Exception("Expected 1D or 2D array of intensities")
     return img
 
 def get_bbox_images(img, mask, padding = 0):
@@ -277,7 +247,7 @@ def interpolate_invalid_values(img, mask):
     for i in range(img.shape[1]):
         for j in range(img.shape[2]):
             ys = img[:,i,j][~mask]
-            interp_f = interpolate.interp1d(xs, ys, kind="cubic", fill_value="extrapolate")
+            interp_f = interpolate.interp1d(xs, ys, kind="previous", fill_value="extrapolate")
             missing_xs = np.argwhere(mask).ravel()
             missing_ys = interp_f(missing_xs)
             invalid_filled[mask,i,j] = missing_ys
@@ -438,13 +408,18 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
     if plot:
         ax1.plot(extrema, extrema_values, "ko")
     if np.all(np.logical_or(extrema < 0, extrema > len(trace))):
-        beta = np.nan*np.ones(4)
+        beta = np.nan*np.ones(5)
         return beta, spl
     global_max_index = np.argmax(extrema_values)
     global_max = extrema[global_max_index]
     global_max_val = extrema_values[global_max_index]
     
     d2 = d2spl(extrema)
+    maxima_indices = np.argwhere(d2 < 0).ravel()
+    ss = np.std(extrema_values[maxima_indices])
+    sm = np.mean(extrema_values[maxima_indices])
+    # print(ss)
+    # print((extrema_values[global_max_index]-sm)/ss)
     minima_indices = np.argwhere(d2 > 0).ravel()
     if len(minima_indices) == 0:
         last_min_before_max = 0
@@ -460,7 +435,7 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
     # min_val = spl(last_min_before_max)
 
     try:
-        min_val = np.min(spl_values[:global_max])
+        min_val = np.nanpercentile(spl_values[:global_max], 10)
         halfmax_magnitude = (global_max_val - min_val)/2 + min_val
 #         halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
 #                                        bounds=[last_min_before_max, global_max]).x
@@ -497,6 +472,7 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
             return beta, spl
         if plot:
             ax1.plot(halfmax, spl(halfmax), "gx")
+            ax1.plot(max_deriv_interp, spl(max_deriv_interp), "bx")
     except Exception as e:
         # print(e)
         beta = np.nan*np.ones(5)
@@ -516,29 +492,49 @@ def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
     x = np.arange(img.shape[0]*upsample_rate)/upsample_rate
     smoothed_vid = np.array([spl(x) for spl in q[1].ravel()])
     smoothed_vid = np.moveaxis(smoothed_vid.reshape((img.shape[1], img.shape[2],-1)), 2, 0)
+    noise_estimate = np.std(img - smoothed_vid, axis=0)
+    beta = np.concatenate([beta, noise_estimate[np.newaxis,:,:]], axis=0)
     return beta, smoothed_vid
 
-def process_isochrones(beta, dt, threshold=None, plot=False, med_filt_size=3):
+def process_isochrones(beta, dt, threshold=None, plot=False, intensity_mask=None, threshold_mode="amplitude", med_filt_size=3, opening_size=3, closing_size=3):
     """ Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude values 
     """
-    amplitude = beta[2,:,:]
+    
+    if threshold_mode == "amplitude":
+        amplitude = beta[2,:,:]
+    elif threshold_mode == "snr":
+        amplitude = (np.abs(beta[2] - 1)/beta[5])**2
+    
     amplitude_nanr = np.copy(amplitude)
+    amplitude_nanr[beta[2] > 2.5] = np.nan
     minval = np.nanmin(amplitude)
-    amplitude_nanr[np.isnan(amplitude)] = minval
+    amplitude_nanr[np.isnan(amplitude_nanr)] = minval
     # thresh = (np.percentile(amplitude_nanr,90)-1)*pct_threshold/100+1
+    amplitude_nanr =  ndimage.gaussian_filter(amplitude_nanr,\
+            sigma=3)
     if threshold is None:
-        threshold = np.percentile(amplitude_nanr, 50)
-        
+        threshold = min(max(filters.threshold_triangle(amplitude_nanr), 2), 100)
+    if intensity_mask is None:
+        intensity_mask = np.ones_like(amplitude, dtype=bool)
+
     # thresh = filters.threshold_otsu(amplitude_nanr)
-    mask = amplitude_nanr>threshold
-    mask = morphology.binary_opening(mask, selem=morphology.disk(3))
-    mask = morphology.binary_closing(mask, selem=morphology.disk(3))
+    mask = (amplitude_nanr>threshold) & intensity_mask
+    if plot:
+        fig1, ax1 = plt.subplots(figsize=(3,3))
+        visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax = ax1)
+    if opening_size > 0:
+        mask = morphology.binary_opening(mask, selem=morphology.disk(opening_size))
+    if closing_size > 0:
+        mask = morphology.binary_closing(mask, selem=morphology.disk(closing_size))
     
     labels = measure.label(mask)
     label_values, counts = np.unique(labels, return_counts=True)
     label_values = label_values[1:]
     counts = counts[1:]
-    mask = labels == label_values[np.argmax(counts)]
+    try:
+        mask = labels == label_values[np.argmax(counts)]
+    except Exception as e:
+        mask = np.zeros_like(amplitude, dtype=bool)
     
     if plot:
         fig1, ax1 = plt.subplots(figsize=(3,3))
@@ -547,8 +543,8 @@ def process_isochrones(beta, dt, threshold=None, plot=False, med_filt_size=3):
     hm = beta[1,:,:]
     dv = beta[4,:,:]
     
-    hm_nans_removed = remove_nans(hm)
-    dv_nans_removed = remove_nans(dv)
+    hm_nans_removed = remove_nans(hm, kernel_size=13)
+    dv_nans_removed = remove_nans(dv, kernel_size=13)
     
     hm_smoothed = ndimage.median_filter(hm_nans_removed, size=med_filt_size)
     hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1)
@@ -574,7 +570,7 @@ def remove_nans(img, kernel_size=3):
     return nans_removed
     
 
-def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
+def estimate_local_velocity(activation_times, deltax=7,deltay=7, deltat=100, valid_points_threshold=10, debug=False, weights=None):
     """ Use local polynomial fitting strategy from Bayley et al. 1998 to determine velocity from activation map
     """
     X, Y = np.meshgrid(np.arange(activation_times.shape[0]), np.arange(activation_times.shape[1]))
@@ -583,6 +579,7 @@ def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
     residuals = np.ones_like(activation_times)*np.nan
     # Note v = (v_y, v_x), consistent with row and column convention
     v = np.ones((2, activation_times.shape[0], activation_times.shape[1]))*np.nan
+    n_points_fit = np.zeros_like(activation_times)
     
     for y,x in coords:
         # if np.isnan(activation_times[y, x]):
@@ -595,14 +592,23 @@ def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
         local_X = local_X.ravel()
         local_Y = local_Y.ravel()
         A = np.array([local_X**2, local_Y**2, local_X*local_Y, local_X, local_Y, np.ones_like(local_X)]).T
+        if weights is None:
+            w = np.ones((A.shape[0], 1))
+        else:
+            w = weights[max(0, y-deltay):min(activation_times.shape[0], y+deltay+1),\
+                                      max(0, x-deltax):min(activation_times.shape[1], x+deltax+1)].ravel()[:, None]
         b = local_times.ravel() 
+        w = w[~np.isnan(b),:]
         A = A[~np.isnan(b),:]
         b = b[~np.isnan(b)]
         mask = np.abs(b - activation_times[y,x]) < deltat
-        A = A[mask,:]
-        b = b[mask]
-        
-        if len(b) < 10:
+        # print(w.shape, A.shape, b.shape)
+        w = w[mask,:]
+        A = A[mask,:] * np.sqrt(w)
+        b = b[mask] * np.sqrt(w).ravel()
+        # print(w.shape, A.shape, b.shape)
+        n_points_fit[y,x] = len(b)
+        if n_points_fit[y,x] < valid_points_threshold:
             continue
         try:
             p, res, _, _ = np.linalg.lstsq(A, b)
@@ -612,9 +618,12 @@ def estimate_local_velocity(activation_times, deltax=7,deltay=7,deltat=100):
             v[:,y,x] = np.flip(p[3:5]/(p[3]**2 + p[4]**2))
         except Exception as e:
             pass
-    return v, Tsmoothed
+    if debug:
+        return v, Tsmoothed, n_points_fit
+    else:
+        return v, Tsmoothed
 
-def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=False, return_params=False):
+def correct_photobleach(img, mask=None, method="localmin", nsamps=51, amplitude_window=0.5, dt=0.01, invert=False, return_params=False):
     """ Perform photobleach correction on each pixel in an image
     """
     if method == "linear":
@@ -635,20 +644,22 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
         mean_trace = image_to_trace(raw_img, mask)
         _, pbleach = traces.correct_photobleach(mean_trace, method=method, nsamps=nsamps)
         corrected_img = np.divide(raw_img, pbleach[:,np.newaxis,np.newaxis])
-        print(corrected_img.shape)
+        # print(corrected_img.shape)
 
     elif method == "monoexp":
         mean_trace = image_to_trace(img, mask)
-        background_level = np.percentile(img, 5)
+        background_level = np.percentile(img, 5, axis=0)
         _, pbleach, params = traces.correct_photobleach(mean_trace,\
-                        method="monoexp", return_params=True, invert=invert)
+                        method="monoexp", return_params=True, invert=invert, a=0.1, b=5e-4)
         dur = img.shape[0]
-        max_val = np.median(img[:10], axis=0)
-        min_val = np.median(img[-10:], axis=0)
+        amplitude_window_idx = int(amplitude_window/dt)
+        max_val = np.median(img[:amplitude_window_idx], axis=0)
+        min_val = np.median(img[-amplitude_window_idx:], axis=0)
         amplitude = (max_val - min_val)/(1-np.exp(params[1]*dur))
         amplitude[~np.isfinite(amplitude)] = 0
         amplitude = np.maximum(amplitude, 0)
         amplitude = filters.median(amplitude, selem=morphology.disk(7))
+        amplitude[amplitude/params[0]*pbleach[-1] > background_level] = 0
         # pctile = np.percentile(amplitude, 99)
         # amplitude[amplitude > pctile] = pctile
         
@@ -658,16 +669,19 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
         #     corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
         
         if return_params:
-            return corrected_img, amplitude
+            return corrected_img, amplitude, params
     elif method == "biexp":
         
         mean_trace = image_to_trace(img, mask)
         background_level = np.percentile(img, 5)
+    
         _, pbleach, params = traces.correct_photobleach(mean_trace,\
                         method="biexp", return_params=True, invert=invert)
         dur = img.shape[0]
-        max_val = np.median(img[:10], axis=0)
-        min_val = np.median(img[-10:], axis=0)
+        amplitude_window_idx = int(amplitude_window/dt)
+
+        max_val = np.median(img[:amplitude_window_idx], axis=0)
+        min_val = np.median(img[-amplitude_window_idx:], axis=0)
         amplitude = (max_val - min_val)/(1-np.exp(params[1]*dur))
         amplitude[~np.isfinite(amplitude)] = 0
         amplitude = np.maximum(amplitude, 0)
@@ -679,10 +693,10 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, invert=Fal
                                         *pbleach[:,np.newaxis,np.newaxis]
         
         
-        if invert:
-            corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
+        # if invert:
+        #     corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
         if return_params:
-            return corrected_img, amplitude
+            return corrected_img, amplitude, params
     elif method == "decorrelate":
         # Zero the mean over time
         # mean_img = img.mean(axis=0)
@@ -717,7 +731,13 @@ def get_spike_videos(img, peak_indices, before, after, normalize_height=True):
                                         np.ones((after_pad_length,img.shape[1],img.shape[2]))*np.nan])
         if normalize_height:
             spike_img /= np.nanmax(spike_img)
-        spike_imgs[pk_idx,:,:,:] = spike_img
+        try:
+            spike_imgs[pk_idx,:,:,:] = spike_img
+        except Exception as e:
+            print(spike_imgs.shape)
+            print(pk)
+            print(before_pad_length, after_pad_length)
+            raise e
     return spike_imgs
 
 def spike_triggered_average_video(img, peak_indices, before, after, include_mask=None, normalize_height=False, full_output=False):
@@ -730,7 +750,7 @@ def spike_triggered_average_video(img, peak_indices, before, after, include_mask
     if full_output:
         return sta, spike_triggered_images
     else:
-        return sta
+        return sta, None
 
 def test_isochron_detection(vid, x, y, savgol_window=25, figsize=(8,3)):
     """ Check detection of half-maximum in spike_triggered averages
@@ -761,35 +781,43 @@ def generate_isochron_map(vid, savgol_window=25, dt=1, prefilter=True):
     chron = hm_indices*dt*1000
     return chron
 
-def analyze_wave_prop(masked_image, mask, nbins=16, savgol_window=5, dt=1):
-    """ Measure wave speed, direction of data
+
+
+def analyze_wave_dynamics(beta, dt, um_per_px, mask_function_tsmoothed=None,\
+                          deltax=9, deltat=350, **isochrone_process_params):
+    """ Measure spatiotemporal properties of wave propagation 
     """
-    kernel_size=3
-    kernel = np.ones((kernel_size,kernel_size))/kernel_size**2
-    filtered = ndi.gaussian_filter(masked_image, [0,2,2])
     
-    isochron = generate_isochron_map(filtered, savgol_window=5, dt=dt)
-    isochron_smoothed = ndi.convolve(isochron,kernel)
-    isochron_smoothed[~mask] = np.nan
-    gradient_y, gradient_x = np.gradient(isochron_smoothed)
-    magnitude = np.sqrt(gradient_x**2 + gradient_y**2)
-    
-    angle = np.arctan2(gradient_y, gradient_x)
-    mag_masked = magnitude[mask]
-    angle_masked = angle[mask]
-    remove_nans = (~np.isnan(mag_masked)) & (~np.isnan(angle_masked))
-    mag_masked = mag_masked[remove_nans]
-    angle_masked = angle_masked[remove_nans]
-    cutoff = np.percentile(mag_masked, 95)
-    mag_masked[mag_masked > cutoff] = cutoff
-    weighted = angle_masked*mag_masked
-    direction = np.sum(weighted)/np.sum(mag_masked)
-    mean_magnitude = np.mean(mag_masked)
-    var_magnitude = np.var(mag_masked)
-    median_magnitude = np.median(mag_masked)
-    hist, _ = np.histogram(angle_masked, bins=nbins, range=(-np.pi/2, np.pi/2))
-    entr = stats.entropy(hist)
-    return mean_magnitude, var_magnitude, median_magnitude, direction, entr
+    def default_mask(Ts, divergence):
+        nan_mask = morphology.binary_dilation(np.pad(np.isnan(Ts),1, constant_values=True), \
+                                            selem=morphology.disk(3))
+
+        return np.ma.masked_array(Ts, nan_mask[1:-1,1:-1] |\
+                                          (divergence < 0.5))
+    if mask_function_tsmoothed is None:
+        mask_function_tsmoothed = default_mask
+    hm_nan, dv_max_nan = process_isochrones(beta, dt, \
+                                            threshold_mode="snr", **isochrone_process_params)
+    if np.sum(~np.isnan(hm_nan)) == 0:
+        return None
+    snr = np.nan_to_num((np.abs(beta[2]-1)/beta[5])**2)
+    _, Tsmoothed = estimate_local_velocity(hm_nan, deltax=deltax, deltay=deltax, deltat=deltat, weights=snr)
+    v, Tsmoothed_dv = estimate_local_velocity(dv_max_nan, deltax=deltax, deltay=deltax, deltat=deltat, weights=snr)
+    v *= um_per_px*1000
+    abs_vel = np.linalg.norm(v, axis=0)
+    mean_velocity = np.nanmean(abs_vel.ravel())
+    median_velocity = np.nanmedian(abs_vel.ravel())
+    divergence = utils.div(v/abs_vel)
+
+    masked_tsmoothed = mask_function_tsmoothed(Tsmoothed, divergence)
+    masked_tsmoothed_dv = mask_function_tsmoothed(Tsmoothed_dv, divergence)
+
+    min_activation_time = np.unravel_index(np.ma.argmin(masked_tsmoothed), Tsmoothed.shape)
+    min_activation_time_dv = np.unravel_index(np.ma.argmin(masked_tsmoothed_dv), Tsmoothed_dv.shape)
+
+    results =  (mean_velocity, median_velocity, min_activation_time[1],\
+                min_activation_time[0], min_activation_time_dv[1], min_activation_time_dv[0])
+    return results, Tsmoothed, Tsmoothed_dv, divergence, v
 
 def fill_nans_with_neighbors(img):
     isnan = np.isnan(img)
@@ -838,7 +866,8 @@ def get_image_dff_corrected(img, nsamps_corr, mask=None, plot=None, full_output=
     
 def image_to_sta(raw_img, fs=1, mask=None, plot=False, \
                  savedir=None, prom_pct=90, sta_bounds="auto", \
-                 exclude_pks = None, offset=0, full_output=False):
+                 exclude_pks = None, offset=0, normalize_height=True, \
+                 full_output=False):
     """ Convert raw image into spike triggered average
     """
     if savedir is not None:
@@ -863,14 +892,18 @@ def image_to_sta(raw_img, fs=1, mask=None, plot=False, \
     dFF_img = get_image_dFF(raw_img)
     
     if savedir:
-        skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img)
+        skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img.astype(np.float32))
+        skio.imsave(os.path.join(savedir, "dFF_display.tif"), exposure.rescale_intensity(dFF_img, out_range=(0,255)).astype(np.uint8))
 
     dFF_mean = image_to_trace(dFF_img, mask=np.tile(mask, (dFF_img.shape[0], 1, 1)))
-
+    axes[1].plot(np.arange(dFF_img.shape[0])/fs, dFF_mean-1, color="C2")
+    sos = signal.butter(5, 2.5, btype="lowpass", \
+                        output="sos",fs=fs)
+    dFF_mean = signal.sosfiltfilt(sos, dFF_mean-1)
     # Identify spikes
     ps = np.percentile(dFF_mean,[10,prom_pct])
     prominence = ps[1] - ps[0]
-    pks, _ = signal.find_peaks(dFF_mean, prominence=prominence, width=(50, None))
+    pks, _ = signal.find_peaks(dFF_mean, prominence=prominence, width=(int(0.5*fs), None))
     
     if exclude_pks:
         keep = np.ones(len(pks), dtype=bool)
@@ -923,22 +956,12 @@ def image_to_sta(raw_img, fs=1, mask=None, plot=False, \
 
 
     # Collect spike traces according to bounds
-    spike_traces = np.nan*np.ones((len(pks), b1+b2))
-    spike_images = np.nan*np.ones((len(pks), b1+b2, dFF_img.shape[1], dFF_img.shape[2]))
-    print(b1,b2)
-    for idx, pk in enumerate(pks):
-        n_prepend = max(0, b1-pk)
-        n_append = max(0, pk+b2-len(dFF_mean))
-
-        mean_block = np.concatenate([np.ones(n_prepend)*np.nan, dFF_mean[max(0, pk-b1):min(len(dFF_mean), pk+b2)], np.ones(n_append)*np.nan])
-        img_block = np.concatenate([np.ones((n_prepend, dFF_img.shape[1], dFF_img.shape[2]))*np.nan, \
-                                    dFF_img[max(0, pk-b1):min(len(dFF_mean), pk+b2),:,:], np.ones((n_append, dFF_img.shape[1], dFF_img.shape[2]))*np.nan])
-        
-        spike_traces[idx,:] = mean_block
-        spike_images[idx,:,:] = img_block
+    sta_trace = traces.get_sta(dFF_mean, pks, b1, b2, f_s=fs, normalize_height=normalize_height)
     
-    sta_trace = np.nanmean(spike_traces, axis=0)
-    sta = np.nanmean(spike_images, axis=0)
+    # Get STA video
+    
+    sta, spike_images = spike_triggered_average_video(dFF_img, pks, b1,\
+                            b2, normalize_height=normalize_height, full_output=full_output)
 
     if plot:
         axes[2].plot(np.arange(b1+b2)/fs, sta_trace)
@@ -950,13 +973,21 @@ def image_to_sta(raw_img, fs=1, mask=None, plot=False, \
         skio.imsave(os.path.join(savedir, "sta.tif"), sta)
         if plot:
             plt.savefig(os.path.join(savedir, "QA_plots.tif"))
-    if full_output:
-        return sta, spike_images
-    return sta
+        with open(os.path.join(savedir, "temporal_statistics.pickle"), "wb") as f:
+            temp_stats = {}
+            temp_stats["freq"] = len(pks)/dFF_img.shape[0]*fs
+            isi = np.diff(pks)/fs
+            temp_stats["isi_mean"] = np.nanmean(isi)
+            temp_stats["isi_std"] = np.nanstd(isi)
+            temp_stats["n_pks"] = len(pks)
+            pickle.dump(temp_stats, f)
+    return sta, spike_images
 
-def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=True, band_bounds=(0.1, 2), \
-                   band_threshold=0.45, full_output=False, opening_size=5, dilation_size=15, f_s=1, \
-                     intensity_threshold=0.5, bbox_offset=5, corr_threshold=0.9, block_size=375, offset=5):
+# SEGMENTATION
+def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=True,\
+                    band_bounds=(0.1, 2), opening_size=5,\
+                    dilation_size=15, method = "freq_band", corr_threshold=0.9, bbox_offset=5, \
+                    **initial_segmentation_args):
     """ Pick out hearts from widefield experiments using PCA and power content in frequency band
     """
 #     print("band_bounds:", band_bounds)
@@ -966,28 +997,22 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
 #     print("f_s:", f_s)
     mean_img = img.mean(axis=0)
     zeroed_image = img-mean_img
-    local_thresh = filters.threshold_local(mean_img, block_size=block_size, offset=offset)
-    # intensity_mask = mean_img > np.percentile(mean_img, intensity_threshold*100)
-    intensity_mask = mean_img > local_thresh
-    pixelwise_fft = fft(zeroed_image, axis=0)
-
-    N_samps = img.shape[0]
     
-    fft_freq = fftfreq(N_samps, 1/f_s)[:N_samps//2]
-
-    abs_power = np.abs(pixelwise_fft[:N_samps//2,:,:])**2
-    norm_abs_power = abs_power/np.sum(abs_power, axis=0)
-
-    band_power = np.sum(norm_abs_power[(fft_freq>band_bounds[0]) & (fft_freq<band_bounds[1]),:,:], axis=0)
-    smoothed_band_power = filters.median(band_power, selem=np.ones((5,5)))*intensity_mask.astype(int)
-    processed_band_power = morphology.binary_opening((smoothed_band_power > band_threshold), selem=np.ones((3,3)))
-    initial_guesses = measure.label(processed_band_power)
+    if method == "freq_band":
+        initial_guesses = segment_by_frequency_band(img, band_bounds, **initial_segmentation_args)
+    elif method == "pca_moments":
+        initial_guesses = segment_by_pca_moments(img, **initial_segmentation_args)
+    elif callable(method):
+        initial_guesses = method(img)
+    else:
+        raise Exception("Invalid segmentation method")
+    fig1, ax1 = plt.subplots(figsize=(4,4))
+    visualize.display_roi_overlay(mean_img, initial_guesses, ax=ax1)
     bboxes = [p["bbox"] for p in measure.regionprops(initial_guesses)]
     new_mask = np.zeros_like(mean_img, dtype=bool)
 #     new_mask_labels = np.deepcopy(initial_guesses)
     n_rois = np.max(initial_guesses)
     corr_img = np.zeros((n_rois, mean_img.shape[0], mean_img.shape[1]), dtype=float)
-
     
     for i in range(1, n_rois+1):
         bbox = bboxes[i-1]
@@ -998,10 +1023,7 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
 #         print(r1,r2,c1,c2)
         roi_mask = np.zeros_like(initial_guesses, dtype=bool)
         roi_mask[r1:r2, c1:c2] = 1    
-    
         initial_trace = image_to_trace(zeroed_image, mask = roi_mask)
-        
-
         roi_traces = zeroed_image[:,roi_mask]
 #         print(roi_traces.shape)
         corrs = np.apply_along_axis(lambda x: stats.pearsonr(initial_trace, x)[0], 0, roi_traces)
@@ -1009,26 +1031,119 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
         corr_img[i-1, r1:r2, c1:c2] = corrs
         
     corr_mask = morphology.binary_opening(np.max(corr_img>corr_threshold, axis=0), selem=np.ones((opening_size,opening_size)))
-#     remaining_rois = np.unique(initial_guesses[corr_mask])
-#     print(remaining_rois)
-#     remaining_rois = remaining_rois[np.nonzero(remaining_rois)]
-#     for i in remaining_rois:
-#         new_mask[initial_guesses==i] = 1
-#     print(dilation_size)
     new_mask = morphology.binary_dilation(corr_mask, selem=np.ones((dilation_size, dilation_size)))
-    
     new_mask_labels = measure.label(new_mask)
 
     coms = ndi.center_of_mass(new_mask, labels=new_mask_labels, index=np.arange(1,np.max(new_mask_labels)+1))
     coms = np.array(coms)
 
-    print(coms.shape)
-    if full_output:
-        return new_mask_labels, coms, intensity_mask, abs_power, smoothed_band_power, initial_guesses, corr_img
-    else:
-        return new_mask_labels, coms
+    # print(coms.shape)
+    return new_mask_labels, coms
 
-def segment_widefield_series(filepaths, expected_embryos, downsample_factor=1, remove_from_start=0, remove_from_end=0, opening_size=3, dilation_size=3, band_bounds=(0.1,2), f_s=1, band_threshold=0.45, corr_threshold=0.9, block_size=375, offset=5):
+def segment_by_frequency_band(img, band_bounds, f_s=1, band_threshold=0.45,\
+                    block_size=375, offset=5):
+    """ Get segmentation by relative power content within a range of frequencies
+    """
+    mean_img = img.mean(axis=0)
+    zeroed_image = img-mean_img
+    local_thresh = filters.threshold_local(mean_img, block_size=block_size, offset=offset)
+    # intensity_mask = mean_img > np.percentile(mean_img, intensity_threshold*100)
+    intensity_mask = mean_img > local_thresh
+    
+    pixelwise_fft = fft(zeroed_image, axis=0)
+    N_samps = img.shape[0]
+    fft_freq = fftfreq(N_samps, 1/f_s)[:N_samps//2]
+    abs_power = np.abs(pixelwise_fft[:N_samps//2,:,:])**2
+    norm_abs_power = abs_power/np.sum(abs_power, axis=0)
+    band_power = np.sum(norm_abs_power[(fft_freq>band_bounds[0]) & (fft_freq<band_bounds[1]),:,:], axis=0)
+    smoothed_band_power = filters.median(band_power, selem=np.ones((5,5)))*intensity_mask.astype(int)
+    processed_band_power = morphology.binary_opening((smoothed_band_power > band_threshold), selem=np.ones((3,3)))
+    return measure.label(processed_band_power)
+
+def segment_by_pca_moments(img, n_components=40, krt_threshold=40,\
+                           skw_threshold=0, ev_threshold=0.3, comp_mag_pct=95):
+    """ Segment a widefield video with multiple embryos using moments of principal components (heart flickers will be small compared to FOV)
+    """
+    mean_img = img.mean(axis=0)
+    zeroed_img = img-mean_img
+    rd = zeroed_img.reshape((zeroed_img.shape[0], -1))
+    # print(rd.shape)
+    n_components = min(n_components, rd.shape[1])
+    pca = PCA(n_components=n_components)
+    pca.fit(rd)
+    comp_magnitudes = np.abs(pca.components_)
+    valid_components = (stats.kurtosis(comp_magnitudes, axis=1) > krt_threshold) &\
+                        (stats.skew(comp_magnitudes, axis=1) > skw_threshold) &\
+                        (pca.explained_variance_ratio_ > ev_threshold)
+    mask = np.zeros_like(mean_img)
+    for comp_idx in np.argwhere(valid_components).ravel():
+        comp = comp_magnitudes[comp_idx].reshape(img.shape[1], img.shape[2])
+        mask += comp > np.percentile(comp, comp_mag_pct)
+    mask = (mask > 0)
+    return measure.label(mask)
+
+def get_heart_mask(img, krt_thresh = 40, corr_thresh = 0.8):
+    pca = PCA(n_components=10)
+    datmatrix = np.copy(img).reshape(img.shape[0], -1)
+    datmatrix -= np.mean(datmatrix, axis=0)
+    pca.fit(datmatrix)
+    krt = stats.kurtosis(pca.components_, axis=1)
+    n_valid_components = np.sum(krt > krt_thresh)
+    if n_valid_components == 0:
+        return np.zeros((img.shape[1], img.shape[2]), dtype=bool)
+    else:
+        comp_idx = np.argmax(krt)
+        comp = np.abs(pca.components_[comp_idx].reshape(img.shape[1], img.shape[2]))
+        rough_mask = comp > np.percentile(comp, 95)
+        test_trace = images.image_to_trace(img, mask=rough_mask)
+        corrs = np.apply_along_axis(lambda x: stats.pearsonr(test_trace, x)[0], 0, datmatrix)
+        corrs = corrs.reshape(img.shape[1], img.shape[2])
+        mask = corrs > corr_thresh
+        return mask
+
+def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70):
+    """ Refine manual segmentation to localize the heart using PCA assuming that transients are the largest fluctuations present.
+    Returns cropped region images and masks for each unique region in the global image mask.
+    
+    """
+    def pca_component_select(pca):
+        """ TBD: a smart way to decide the number of principal components. for now just return 1.
+        """
+        n_components = 1
+        selected_components = np.zeros_like(pca.components_[0])
+        fraction_explained_variance = pca.explained_variance_/np.sum(pca.explained_variance_)
+        for comp_index in range(n_components):
+            selected_components = selected_components + pca.components_[comp_index]*fraction_explained_variance[comp_index]        
+        return selected_components
+    
+    region_masks = []
+    region_data, region_pixels = get_all_region_data(img, rois)
+    for region_idx in range(len(region_data)):
+        rd = region_data[region_idx]
+        gc = region_pixels[region_idx]
+        rd_bgsub = rd - np.mean(rd, axis=0)
+        try:
+            pca = PCA(n_components=n_components)
+            pca.fit(rd_bgsub)
+            selected_components = np.abs(pca_component_select(pca))
+        
+            indices_to_keep = selected_components > np.percentile(selected_components, threshold_percentile)
+    #         print(gc.shape)
+    #         print(indices_to_keep.shape)
+            mask = np.zeros((img.shape[1], img.shape[2]), dtype=bool)
+            mask[gc[:,0],gc[:,1]] = indices_to_keep
+        except ValueError as e:
+            roi_indices = np.unique(rois)
+            roi_indices = roi_indices[roi_indices != 0]
+            mask = rois == roi_indices[region_idx]
+
+        selem = np.ones((3,3), dtype=bool)
+        mask = morphology.binary_opening(mask, selem)
+        region_masks.append(mask)
+        
+    return region_masks
+
+def segment_widefield_series(filepaths, **segmentation_args):
     """ Run heart segmentation for widefield experiments on all files in a folder.
     Expected in true chronological order (not reverse).
     """
@@ -1039,12 +1154,12 @@ def segment_widefield_series(filepaths, expected_embryos, downsample_factor=1, r
     exclude_from_write = np.zeros(len(filepaths), dtype=bool)
     img_shape = None
     # Perform inital segmentation
-    for idx, f in enumerate(np.flip(filepaths)):
+    for idx, f in enumerate(filepaths):
         try:
             del raw
         except Exception as e:
             pass
-        print(f)
+        # print(f)
         try:
             raw = skio.imread(f)
             if img_shape is None:
@@ -1052,42 +1167,31 @@ def segment_widefield_series(filepaths, expected_embryos, downsample_factor=1, r
             else:
                 if raw.shape[1:3] != img_shape:
                     raise Exception("Incorrect image shape")
-            raw = raw[remove_from_start:raw.shape[0]-remove_from_end,:,:]
         except Exception as e:
-            print(e)
-            exclude_from_write[idx] = 1
+            # print(e)
+            # exclude_from_write[idx] = 1
+            raise e
             continue
-        if downsample_factor > 1:
-            downsample = transform.downscale_local_mean(raw, (1,downsample_factor,downsample_factor))
-        else:
-            downsample = raw
         try:
-            curr_labels, curr_coms = identify_hearts(downsample, \
-                        prev_coms=curr_coms, prev_mask_labels=curr_labels, \
-                        opening_size=opening_size, dilation_size=dilation_size, band_threshold=band_threshold, \
-                                                block_size=block_size, offset=offset, \
-                                                 band_bounds=band_bounds, f_s=f_s, corr_threshold=corr_threshold)
+            curr_labels, curr_coms = identify_hearts(raw, \
+                        **segmentation_args)
         except Exception as e:
+            # raise e
             print(e)
             print(curr_coms)
+            print(f)
+            # raise e
             pass
-        frames.append(np.copy(curr_labels))
+        if curr_labels is None:
+            frames.append(np.zeros((raw.shape[1], raw.shape[2]), dtype=int))
+        else:
+            frames.append(np.copy(curr_labels))
         
     vid = np.array(frames)
-    return vid, np.flip(exclude_from_write)
-
-def pairwise_mindist(x, y):
-    """ Calculate minimum distance between each point in the list x and each point in the list y
-    """
-    
-    pairwise_dist = np.abs(np.subtract.outer(x, y))
-    mindist_indices = np.argmin(pairwise_dist, axis=1)
-    mindist = pairwise_dist[np.arange(x.shape[0]), mindist_indices]
-    
-    return mindist, mindist_indices
+    return vid, exclude_from_write
 
 def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_labels=True):
-    """ Connect two ROI segmentations adjacent in time
+    """ Connect two multi-ROI segmentations adjacent in time
     """
     curr_mask = curr_labels > 0
     all_curr_labels = np.unique(curr_labels)[1:]
@@ -1098,7 +1202,7 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     if len(curr_coms.shape) == 2 and len(prev_coms) > 0:
         curr_coms = curr_coms[:,0] + 1j*curr_coms[:,1]
 
-        mindist, mindist_indices = pairwise_mindist(curr_coms, prev_coms)
+        mindist, mindist_indices = utils.pairwise_mindist(curr_coms, prev_coms)
         link_curr = np.argwhere(mindist < radius).ravel()
 
         link_prev = set(mindist_indices[link_curr]+1)
@@ -1133,14 +1237,17 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     new_mask = new_labels > 0
     new_coms =  ndi.center_of_mass(new_mask, labels=new_labels, index=np.unique(new_labels)[1:])
     new_coms = np.array(new_coms)
-    new_coms = new_coms[:,0] + 1j*new_coms[:,1]
+    try:
+        new_coms = new_coms[:,0] + 1j*new_coms[:,1]
+    except Exception as e:
+        new_coms = []
     return new_labels, new_coms
 
 def link_stack(stack, step=-1, radius=15, propagate_old_labels=True):
     if step <0:
         curr_t = 1
     else:
-        curr_t = stack.shape[0]-1
+        curr_t = stack.shape[0]-2
 
     prev_labels = stack[curr_t+step]
     prev_mask = prev_labels > 0
@@ -1152,8 +1259,14 @@ def link_stack(stack, step=-1, radius=15, propagate_old_labels=True):
     new_labels = [prev_labels]
     while curr_t >=0 and curr_t < stack.shape[0]:
         curr_labels = stack[curr_t]
-        curr_labels, curr_coms = link_frames(curr_labels, prev_labels, prev_coms,\
-             radius=radius, propagate_old_labels=propagate_old_labels)
+        try:
+            curr_labels, curr_coms = link_frames(curr_labels, prev_labels, prev_coms,\
+                 radius=radius, propagate_old_labels=propagate_old_labels)
+        except Exception as e:
+            fig1, ax1 = plt.subplots(figsize=(4,4))
+            ax1.imshow(curr_labels)
+            print(prev_coms)
+            raise e
         prev_labels = curr_labels
         prev_coms = curr_coms
         curr_t -= step
@@ -1185,9 +1298,14 @@ def fill_missing(vid, threshold=100):
     roi_sizes = []
     for roi in range(1, np.max(vid)+1):
         roi_sizes.append(np.sum(vid==roi, axis=(1,2)))
-    roi_sizes = np.array(roi_sizes)
+    roi_sizes = np.array(roi_sizes).reshape(-1,vid.shape[0])
+
     below_threshold = roi_sizes < threshold
-    closest_above_threshold = np.apply_along_axis(utils.closest_non_zero, 1, ~below_threshold).squeeze()
+    try:
+        closest_above_threshold = np.apply_along_axis(utils.closest_non_zero, 1, ~below_threshold).squeeze()
+    except Exception as e:
+        return vid
+    closest_above_threshold = closest_above_threshold.reshape(np.max(vid), -1)
     filled_vid = np.zeros_like(vid)
     for i in range(1, closest_above_threshold.shape[0]+1):
         replaced_vals = vid[closest_above_threshold[i-1],:,:] == i
@@ -1217,22 +1335,69 @@ def get_regularized_mask(img, rois):
     
     return area_regularized_mask
 
-def plot_image_roi_traces(masks, figsize_single=(12,4), img_size=4, t=None, traces=None, image=None):
-    """ traces - optional manual traces
+def split_embryos(img, block_size=201, offset=0, extra_split_arrays=[],\
+                  min_obj_size = 1000, manual_roi_seeds=None, manual_bbox_size=None, **threshold_params):
+    """ Use assumption that embryos lie on a grid to split a widefield video into videos for individual embryos. This is useful when panning between multiple FOVs that may not necessarily be aligned.
     """
-    n_rois = masks.shape[0]
+    mean_img = img.mean(axis=0)
+    threshold = filters.threshold_local(mean_img, block_size, offset=offset, **threshold_params)
+    mask = mean_img > threshold
+    mask = morphology.binary_opening(mask, selem=morphology.disk(3))
+    mask = morphology.remove_small_objects(mask, min_size=min_obj_size)
+    regions = measure.label(mask)
+    if manual_roi_seeds is not None:
+        for r in range(1, regions.max()+1):
+            if np.sum(manual_roi_seeds[regions==r])==0:
+                mask[regions==r] = 0
+    regions = measure.label(mask)
+                
+    props_table = pd.DataFrame(measure.regionprops_table(regions, properties=['label', 'centroid']))
+    centroids = np.array(props_table[["centroid-1", "centroid-0"]])
+    _, mindist_indices = utils.pairwise_mindist(centroids, centroids)
+    direction_vectors = centroids - centroids[mindist_indices]
+#     print(direction_vectors.shape)
+    # Enforce x positive
+    sgn = np.ones((direction_vectors.shape[0])) - 2*(direction_vectors[:,0] < 0)
+    direction_vectors *= sgn[:,np.newaxis]
+#     print(direction_vectors)
+    theta = -np.median(np.arctan2(-direction_vectors[:,1], direction_vectors[:,0]))
+    rotated_im = np.array([transform.rotate(img[i], theta*180/np.pi,\
+                            resize=False, preserve_range=True) for i in range(img.shape[0])])
+
+    rotated_mask = transform.rotate(mask, theta*180/np.pi, cval=0, resize=False)
+    rotated_props = pd.DataFrame(measure.regionprops_table(measure.label(rotated_mask), properties=['label', 'bbox', 'centroid']))
+    embryo_images = []
+    processed_extra_arrays = []
+    for i in range(rotated_props.shape[0]):
+        row = rotated_props.iloc[i]
+        if manual_bbox_size:
+            end_y = min(int(row["bbox-0"] + manual_bbox_size[0]), rotated_im.shape[0])
+            end_x = min(int(row["bbox-1"] + manual_bbox_size[1]), rotated_im.shape[1])
+        else:
+            end_y = int(row["bbox-2"])
+            end_x = int(row["bbox-3"])
+        cropped_im = rotated_im[:,int(row["bbox-0"]):end_y,int(row["bbox-1"]):end_x]
+        if manual_bbox_size:
+            pad_y = max(manual_bbox_size[0] - (end_y - int(row["bbox-0"])), 0)
+            pad_x = max(manual_bbox_size[1] - (end_x - int(row["bbox-1"])), 0)
+            # print(pad_y, pad_x)
+            cropped_im = np.pad(cropped_im, np.array([[0,0], [0,pad_y], [0,pad_x]]))
+            # print(cropped_im.shape)
+
+        embryo_images.append(cropped_im)
     
-    fig1, axes = plt.subplots(n_rois, 2, figsize=(figsize_single[0], figsize_single[1]*n_rois), \
-                              gridspec_kw={"width_ratios": [figsize_single[0]-img_size, img_size]})
-    if traces is None:
-        traces = np.array([image_to_trace(image, mask[idx]) for idx in range(n_rois)])
-    if t is None:
-        t = traces.shape[1]
-    for idx in range(n_rois):
-        ax = axes[idx,0]
-        ax.plot(t, traces[idx], color="C%d" % idx)
-        axes[idx,1].imshow(masks[idx])
-        axes[idx,1].set_axis_off()
+    for arr in extra_split_arrays:
+        fig1, ax1 = plt.subplots(figsize=(4,4))
+        ax1.imshow(arr)
+        processed_extra_arrays.append([])
+        if len(arr.shape) < 3:
+            arr = np.expand_dims(arr, 0)
         
-    plt.tight_layout()
-    return fig1, axes
+        rotated_array = np.array([transform.rotate(arr[i], theta*180/np.pi, \
+                                        cval=0, preserve_range=True, resize=False) for i in range(arr.shape[0])])
+
+        for i in range(rotated_props.shape[0]):
+            row = rotated_props.iloc[i]
+            processed_extra_arrays[-1].append(np.squeeze(rotated_array[:,int(row["bbox-0"]):int(row["bbox-2"]),\
+                                        int(row["bbox-1"]):int(row["bbox-3"])].astype(arr.dtype)))
+    return embryo_images, rotated_props, rotated_mask, processed_extra_arrays

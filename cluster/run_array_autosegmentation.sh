@@ -8,4 +8,4 @@
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 conda init bash
 conda activate bjia
-python3 SpikeCounter/run_array_autosegmentation.py $1 $2 $3 --start_idx $4 --end_idx $5 --time_remove_from_start $6 --time_remove_from_end $7 --opening_size $8 --dilation_size $9 --block_size ${10} --offset ${11} --band_threshold ${12} --corr_threshold ${13} --band_min ${14} --band_max ${15}
+python3 SpikeCounter/run_array_autosegmentation.py $1 $2 --start_idx $3 --end_idx $4 --opening_size $5 --dilation_size $6 --block_size $7 --offset $8  --band_threshold $9 --corr_threshold ${10} --band_min ${11} --band_max ${12}

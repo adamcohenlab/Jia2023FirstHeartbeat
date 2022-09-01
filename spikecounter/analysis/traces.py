@@ -57,7 +57,7 @@ def plot_trace_with_stim_bars(trace, stims, start_y, width, height, dt=1, figsiz
         visualize.plot_scalebars(ax1, scalebar_params)
     return fig1, ax1
 
-def correct_photobleach(trace, method="linear", nsamps=None, plot=False, return_params=False, invert=False):
+def correct_photobleach(trace, method="linear", nsamps=None, plot=False, return_params=False, invert=False, **cost_function_params):
     """ Correct trace for photobleaching
     """
     tidx = np.arange(len(trace))
@@ -77,25 +77,30 @@ def correct_photobleach(trace, method="linear", nsamps=None, plot=False, return_
         corrected_trace = trace/photobleach
     elif method == "monoexp":
         tpoints = np.arange(len(trace))
-        def expon_below(x):
+        def expon_below(x, a=1, b=1):
             y = x[0]*np.exp(tpoints*x[1]) + x[2]
-            cost = np.sum((y - trace)**2 + np.exp(y - trace))
+            # soft_constraint = a*np.exp(b*(y - trace))
+            soft_constraint = b*np.sum((np.maximum(y-trace, 0))**a)
+            # soft_constraint = a*np.sum(np.log(np.maximum(y-trace,0)+1))
+            cost = np.sum((y - trace)**2 + soft_constraint)
             return cost
-        def expon_above(x):
+        def expon_above(x, a=1, b=1):
             y = x[0]*np.exp(tpoints*x[1]) + x[2]
-            cost = np.sum((y - trace)**2 + np.exp(trace-y))
+            cost = np.sum((y - trace)**2 + a*np.exp(b*(trace-y)))
             return cost
         
-        guess_tc = -(np.percentile(trace, 95)/np.percentile(trace,5))/len(trace)
-        
-        p0 = [np.max(trace)-np.min(trace), guess_tc, np.min(trace)*0.8]
+        pct1, pct2, med = np.percentile(trace, [5,85, 50])
+        guess_tc = np.log((pct2-med)/(pct2-pct1))/(len(trace)/2)
+
+        baseline = pct1 - (pct2-pct1)*0.5
+        p0 = [(pct2-pct1)*1.5, guess_tc, pct1]
         if invert:
             p0[2] = np.max(trace)
-            res = optimize.minimize(expon_above, p0, \
-            bounds=[(0,np.inf),(-np.inf,0),(-np.inf,np.inf)])
+            res = optimize.minimize(lambda x: expon_above(x, **cost_function_params),\
+                p0, bounds=[(0,np.inf),(-np.inf,0),(-np.inf,np.inf)])
         else:
-            res = optimize.minimize(expon_below, p0, \
-                bounds=[(0,np.inf),(-np.inf,0),(-np.inf,np.inf)])
+            res = optimize.minimize(lambda x: expon_below(x, **cost_function_params),\
+                p0, bounds=[(pct2-pct1,np.inf),(p0[1]*1.5,p0[1]*0.1),(baseline,med)])
         popt = res.x
         if plot:
             fig1, ax1 = plt.subplots(figsize=(6,6))
@@ -122,11 +127,11 @@ def correct_photobleach(trace, method="linear", nsamps=None, plot=False, return_
         p0 = [(np.max(trace)-np.min(trace))*0.95, guess_tc, (np.max(trace)-np.min(trace))*0.05, guess_tc2, np.min(trace)*0.8]
         if invert:
             p0[4] = np.max(trace)
-            res = optimize.minimize(expon_above, p0, \
-            bounds=[(0,np.inf),(-np.inf,0), (0,np.inf),(-np.inf,guess_tc), (-np.inf,np.inf)])
+            res = optimize.minimize(lambda x: expon_above(x, **cost_function_params),\
+            p0, bounds=[(0,np.inf),(-np.inf,0), (0,np.inf),(-np.inf,guess_tc), (-np.inf,np.inf)])
         else:
-            res = optimize.minimize(expon_below, p0, \
-                bounds=[(0,np.inf),(-np.inf,0), (0,np.inf),(-np.inf,guess_tc), (-np.inf,np.inf)])
+            res = optimize.minimize(lambda x: expon_below (x, **cost_function_params),\
+            p0, bounds=[(0,np.inf),(-np.inf,0), (0,np.inf),(-np.inf,guess_tc), (-np.inf,np.inf)])
         popt = res.x
         if plot:
             fig1, ax1 = plt.subplots(figsize=(6,6))
@@ -839,7 +844,7 @@ class TimelapseArrayExperiment():
         ax2.set_xlabel(r"$\Delta F/F$")
         ax2.legend(ls, labels)
 
-        return fig1, ax1
+        return fig1, [ax1, ax2]
     
 
     def plot_spikes(self, rois=None, n_cols=1, figsize=(12,4), time="s"):

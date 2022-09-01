@@ -239,6 +239,7 @@ class HyperStackViewer(ZStackViewer):
         self.rgb_on = False
         self._marker_string = 'w-'
         self._target_n_points = None
+        self.points = []
         if overlay is None:
             self.overlay = np.zeros_like(self.img)
         else:
@@ -291,15 +292,22 @@ class HyperStackViewer(ZStackViewer):
         # print(points.shape)
         return self._points_to_mask(points, propagate_z=propagate_z)
     
-    def select_points_clicky(self, n_points=1):
+    def select_points_clicky(self, n_points=1, append=False):
         self._marker_string = 'wx'
-        self._target_n_points = n_points
+        if append:
+            self._target_n_points = n_points + len(self.points)
+        else:
+            self._target_n_points = n_points
         self.curr_point_artist = None
-        self.points = []
+        if not append:
+            self.points = []
         fig, ax = plt.subplots(figsize=(self.width, self.height))
         ax.imshow(self._get_curr_slice())
-        overlay = self._get_curr_slice(True)
+        overlay = self._get_curr_slice(overlay=True)
         ax.imshow(overlay, alpha=0.7*(overlay !=0), cmap=plt.cm.gray)
+        if len(self.points) > 0:
+            xs, ys = zip(*self.points)
+            ax.plot(xs, ys, self._marker_string)[0]
         ax.set_title(self._generate_title_string())
         self.fig = fig
         self.cidclick = fig.canvas.mpl_connect('button_press_event', self._mark_and_record_points_clicky)
@@ -407,6 +415,7 @@ class HyperStackViewer(ZStackViewer):
                     plt.close()
 #                     self.interact_complete.set()
             elif len(self.points) == self._target_n_points:
+                self._draw_clicky_contour(fig)
                 self._disconnect()
                 plt.close()
 #                 self.interact_complete.set()

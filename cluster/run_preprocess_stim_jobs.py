@@ -10,6 +10,7 @@ from datetime import datetime
 parser = argparse.ArgumentParser()
 parser.add_argument("rootpath", type=str)
 parser.add_argument("expected_stims", type=int)
+parser.add_argument("--expt_info", type=str, default="analysis/experiment_data.csv")
 parser.add_argument("--output_dir", default=None)
 parser.add_argument("--scale_factor", type=int, default=2)
 parser.add_argument("--remove_from_start", type=int, default=0)
@@ -36,28 +37,17 @@ if args.crosstalk_mask == "0":
 else:
     crosstalk_mask = os.path.join(rootpath, args.crosstalk_mask)
 
-expt_info = pd.read_csv(os.path.join(rootpath, "analysis/experiment_data.csv")).sort_values("start_time").reset_index()
-start_times = [datetime.strptime(t,"%H:%M:%S") for t in list(expt_info["start_time"])]
-offsets = [s - start_times[0] for s in start_times]
-offsets = [o.seconds for o in offsets]
-expt_info["offset"] = offsets
+    
+expt_info = pd.read_csv(os.path.join(rootpath,args.expt_info), dtype=str).sort_values("start_time")
+print(expt_info)
 
-# expt_tags = []
-# for fn in expt_info["file_name"]:
-#     if "pg" in fn:
-#         expt_tags.append("stim")
-#     elif "recovery" in fn:
-#         expt_tags.append("recovery")
-#     elif "pacing" in fn:
-#         expt_tags.append("prepost")
-#     else:
-#         expt_tags.append("NA")
-# expt_info["tag"] = expt_tags
-# expt_info = expt_info.set_index("tag")
-# del expt_info["index"]
+for s in ["downsampled", "stim_frames_removed", "corrected", "denoised"]:
+    os.makedirs(os.path.join(output_dir, s), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "analysis", s), exist_ok=True)
+    expt_info.to_csv(os.path.join(output_dir, "analysis", s, "experiment_data.csv"), index=False)
 
 for f in expt_info["file_name"]:
-    sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_widefield_stim.sh", os.path.join(rootpath, "%s.tif" % f), str(args.expected_stims), output_dir, str(args.remove_from_start),\
+    sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_widefield_stim.sh", rootpath, f, str(args.expected_stims), output_dir, str(args.remove_from_start),\
               str(args.remove_from_end), str(args.scale_factor),\
               str(args.zsc_threshold), str(args.upper), str(args.fs),\
               str(args.start_from_downsampled), str(args.expected_stim_width),\

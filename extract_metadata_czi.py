@@ -7,6 +7,7 @@ import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("input", help="Input file or folder")
+parser.add_argument("--expt_name", help="Experiment name", default=None)
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
 
 args = parser.parse_args()
@@ -26,6 +27,11 @@ if args.output_folder is None:
     output_folder = os.path.dirname(input_path)
 else:
     output_folder = args.output_folder
+                    
+if args.expt_name is None:
+    expt_name = filename
+else:
+    expt_name = args.expt_name
 
 # Now parse the XML file:
 tree = ET.parse(input_path)

@@ -1,4 +1,4 @@
-from scipy import stats, interpolate
+from scipy import stats, interpolate, optimize
 from sklearn import neighbors
 from sklearn.utils.extmath import randomized_svd
 import numpy as np
@@ -189,3 +189,13 @@ def multi_regress(data_matrix, traces, regress_dc=True):
     else:
         dc = np.zeros_like(data_matrix)
     return dc + resid
+
+def fit_sigmoid(xs, ys, fixed_amplitude=None):
+    if fixed_amplitude:
+        def sigmoid(x, tau, x0):
+            return fixed_amplitude/(1 + np.exp(-(x - x0)/tau))
+    else:
+        def sigmoid(x, tau, x0, a):
+            return a/(1 + np.exp(-(x - x0)/tau))
+    popt, _ = optimize.curve_fit(sigmoid, xs, ys)
+    return popt

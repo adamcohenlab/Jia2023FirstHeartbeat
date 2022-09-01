@@ -359,3 +359,20 @@ def closest_non_zero(arr):
 #     print(distances.shape)
     min_indices = np.argmin(distances, axis=1)
     return nonzeros[min_indices]
+
+
+def pairwise_mindist(x, y):
+    """ Calculate minimum distance between each point in the list x and each point in the list y
+    """
+    if len(x.shape) > 1:
+        pairwise_dist = np.sum(np.array([np.subtract.outer(x[:,i], y[:,i]) for i in range(x.shape[1])])**2, axis=0)**0.5
+    else:
+        # Assume x and y are representation of 2D vectors as complex values
+        pairwise_dist = np.abs(np.subtract.outer(x, y))
+    # Check if x and y are identical, i.e. find the minimum distance to the point that is not itself
+    if np.all(np.diag(pairwise_dist)==0):
+        pairwise_dist += np.diag(np.inf*np.ones(pairwise_dist.shape[0]))
+    mindist_indices = np.argmin(pairwise_dist, axis=1)
+    mindist = pairwise_dist[np.arange(x.shape[0]), mindist_indices]
+    
+    return mindist, mindist_indices
