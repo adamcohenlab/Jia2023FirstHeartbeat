@@ -1,3 +1,4 @@
+#! /usr/bin/python3
 import numpy as np
 from tifffile import imread, imsave
 import pandas as pd
@@ -56,7 +57,7 @@ for file_path in files:
         filename = os.path.splitext(os.path.basename(file_path))[0]
         file_path_1 = file_path
 
-    img = utils.standardize_n_dims(imread(file_path_1), missing_dims=[1,2])
+    img = utils.standardize_n_dims(imread(file_path_1).astype(np.float32), missing_dims=[1,2])
     n_timepoints = img.shape[0]
 
 
@@ -91,13 +92,31 @@ for file_path in files:
             map_path = os.path.join(args.path_to_regions, filename + "_ROIs.tif")
         else:
             map_path = args.path_to_regions
+        print(map_path)
         mask_map = imread(map_path)
+        print(np.unique(mask_map))
         for i in range(1,np.max(mask_map)+1):
             mask = mask_map == i
             mask = np.tile(mask, (img.shape[0], img.shape[1], img.shape[2], 1, 1))
             masked_img = np.ma.array(img, mask=~mask)
             masked_img = masked_img[:,:,args.channel,:,:]
+            mask_indices = np.argwhere(mask[0,0,args.channel,:,:])
+            com_x = np.zeros((masked_img.shape[0],1))
+            com_y = np.zeros((masked_img.shape[0],1))
+            for px_idx in range(mask_indices.shape[0]):
+                px = mask_indices[px_idx,:]
+                y = px[0]
+                x = px[1] 
+                intensity = masked_img[:,0,y,x][:,np.newaxis].astype(float)  
+                com_x += float(x)*intensity
+                com_y += float(y)*intensity
+            mass = masked_img.sum(axis=(2,3))  
+            com_x = com_x/mass
+            com_y = com_y/mass 
             stack_traces = stack_traces_to_pandas(i-1, masked_img.mean(axis=(2,3)))
+            stack_traces = np.concatenate([stack_traces, com_x, com_y], axis=1)
+
+
             trace_data.append(stack_traces)
     region_data = pd.DataFrame(region_data, columns=["cent_x", "cent_y", "area", "eccentricity"])
 
@@ -116,7 +135,7 @@ for file_path in files:
                 trace_data.append(stack_traces)
             n_timepoints += img.shape[0]
     
-    trace_data = pd.DataFrame(np.concatenate(trace_data, axis=0), columns=["region", "z", "t", "mean_intensity"]).astype({"region": int, "z":int, "t":float, "mean_intensity":float})
+    trace_data = pd.DataFrame(np.concatenate(trace_data, axis=0), columns=["region", "z", "t", "mean_intensity", "com_x", "com_y"]).astype({"region": int, "z":int, "t":float, "mean_intensity":float, "com_x":float, "com_y":float})
     # trace_data = df.
     # print(filename)
     # trace_data["t"] = time_array*list(np.arange(n_timepoints))

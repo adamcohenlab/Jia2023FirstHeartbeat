@@ -3,11 +3,23 @@ import numpy as np
 from skimage import transform
 from datetime import datetime
 import matplotlib.pyplot as plt
+from matplotlib import colors
 from ipywidgets import interact
 from scipy import interpolate
 import re
 import pandas as pd
 import mat73
+
+def round_rel_deviation(a, factor=100):
+    
+    arr = np.atleast_1d(a)
+    try:
+        n_decimals = -int(np.floor(np.min(np.log10(np.abs(arr[arr!=0])/factor))))
+    except ValueError:
+        n_decimals = 1
+    rounded = np.squeeze(np.round(arr, n_decimals))
+#     print(arr, n_decimals, rounded)
+    return rounded
 
 def shiftkern(kernel, a, b, c, dt):
     """ From Hochbaum and Cohen 2012
@@ -49,7 +61,7 @@ def load_experiment_metadata(rootdir, expt_name):
         expt_data = None
     return expt_data
 
-def process_experiment_metadata(expt_metadata, regexp_dict={}):
+def process_experiment_metadata(expt_metadata, regexp_dict={}, dtypes={}):
     """ Extract data from filenames in basic metadata DF
     """
     new_df = expt_metadata.sort_values("start_time").reset_index()
@@ -68,6 +80,8 @@ def process_experiment_metadata(expt_metadata, regexp_dict={}):
             else:
                 matches.append(None)
         new_df[key] = matches
+        if key in dtypes:
+            new_df[key] = new_df[key].astype(dtypes[key])
     
     return new_df
 
@@ -76,7 +90,7 @@ def match_experiments_to_snaps(expt_data, snap_data):
     snap_data_by_embryo = snap_data.set_index("embryo")    
     for i in range(expt_data.shape[0]):
         try:
-            embryo_snap_data = snap_data_by_embryo.loc[[str(expt_data.iloc[i]["embryo"])]]
+            embryo_snap_data = snap_data_by_embryo.loc[[expt_data.iloc[i]["embryo"]]]
             start_time = datetime.strptime(expt_data.iloc[i]["start_time"], "%H:%M:%S")
             # print(embryo_snap_data[["start_time"]])
             snap_times = [datetime.strptime(t, "%H:%M:%S") for t \

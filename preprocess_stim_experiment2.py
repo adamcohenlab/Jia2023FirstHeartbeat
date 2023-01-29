@@ -6,7 +6,7 @@ import os
 import skimage.io as skio
 import numpy as np
 from sklearn.utils.extmath import randomized_svd
-from skimage import transform, morphology
+from skimage import transform, morphology, exposure
 from scipy import ndimage, signal, stats
 from spikecounter.analysis import images, traces
 from spikecounter.analysis import stats as sstats
@@ -50,6 +50,7 @@ def generate_invalid_frame_indices(stim_trace, dt_frame):
     
 
 args = parser.parse_args()
+print(args)
 expt_name = args.exptname
 rootdir = args.rootdir
 crosstalk_channel = args.crosstalk_channel
@@ -160,9 +161,10 @@ if args.pb_correct_method == "monoexp" or args.pb_correct_mask == "dynamic":
     mask = mean_img > np.percentile(mean_img, 80)
 else:
     mask = None
+print(args.pb_correct_method)
 
-pb_corrected_img = images.correct_photobleach(stim_frames_removed, mask=mask, method=args.pb_correct_method,\
-                                              nsamps=nsamps, invert=args.invert, amplitude_window=2)
+pb_corrected_img = exposure.rescale_intensity(images.correct_photobleach(stim_frames_removed, mask=mask, method=args.pb_correct_method,\
+                                              nsamps=nsamps, invert=args.invert, amplitude_window=2), out_range=np.uint16)
 skio.imsave(os.path.join(output_folder, "corrected", "%s.tif" % expt_name), pb_corrected_img)
 
 if args.denoise == 0:
@@ -191,4 +193,5 @@ denoised = denoised.reshape(downsampled.shape)
 
 # Add back DC offset for the purposes of comparing noise to mean intensity
 denoised += mean_img
-skio.imsave(os.path.join(output_folder, "denoised", "%s.tif" % expt_name), denoised.astype(np.float32))
+
+skio.imsave(os.path.join(output_folder, "denoised", "%s.tif" % expt_name), exposure.rescale_intensity(denoised, out_range = np.uint16))

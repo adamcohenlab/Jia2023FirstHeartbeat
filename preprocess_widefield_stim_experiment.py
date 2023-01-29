@@ -6,7 +6,7 @@ import os
 import skimage.io as skio
 import numpy as np
 from sklearn.utils.extmath import randomized_svd
-from skimage import transform, morphology
+from skimage import transform, morphology, exposure
 from scipy import ndimage
 from spikecounter.analysis import images, traces
 from spikecounter.analysis import stats as sstats
@@ -144,7 +144,7 @@ else:
 
 pb_corrected_img = images.correct_photobleach(stim_frames_removed, mask=mask, method=args.pb_correct_method,\
                                               nsamps=nsamps, invert=args.invert)
-skio.imsave(os.path.join(output_folder, "corrected", "%s.tif" % expt_name), pb_corrected_img)
+skio.imsave(os.path.join(output_folder, "corrected", "%s.tif" % expt_name), pb_corrected_img.astype(np.float32))
 
 mean_img = pb_corrected_img.mean(axis=0)
 
@@ -164,7 +164,8 @@ if args.denoise == 1:
 
     # Add back DC offset for the purposes of comparing noise to mean intensity
     denoised += mean_img
-    skio.imsave(os.path.join(output_folder, "denoised", "%s.tif" % expt_name), np.round(denoised).astype(np.uint16))
+    denoised = exposure.rescale_intensity(denoised, out_range=np.uint16)
+    skio.imsave(os.path.join(output_folder, "denoised", "%s.tif" % expt_name), denoised)
 
 for subfolder in ["stim_frames_removed", "denoised", "corrected"]:
     os.makedirs(os.path.join(output_folder, "%s/analysis/stim_indices" % subfolder), exist_ok=True)

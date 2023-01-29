@@ -20,6 +20,28 @@ import pywt
 
 plt.style.use(os.path.join(os.path.dirname(__file__), "../report.mplstyle"))
 
+
+def calculate_lags(pks, start_idx, end_idx, ref_indices, plot=True, forward_only=True):
+#     filtered = signal.savgol_filter(filtered, 5, 3)
+    
+
+    if len(pks) == 0:
+        return np.array([]), np.array([]), np.array([]), 0
+    
+    stim_pks = pks[(pks >= start_idx)*(pks < end_idx)]
+    mean_freq = len(stim_pks)/(end_idx-start_idx)
+    pairwise_diff = np.subtract.outer(stim_pks, ref_indices)
+    print(pairwise_diff.shape)
+    if forward_only:
+        pairwise_diff[pairwise_diff<0] = np.iinfo(pairwise_diff.dtype).max
+    mindist_indices = np.argmin(np.abs(pairwise_diff), axis=1)
+    print(mindist_indices)
+    mindist = pairwise_diff[np.arange(len(stim_pks)), mindist_indices]
+    
+    associated_stims = ref_indices[mindist_indices]
+    
+    return stim_pks, mindist, associated_stims
+
 def find_stim_starts(crosstalk_mask, expected_period, dt=1):
     """ Find the start of a stimulation period based on cross-excitation from blue channel
     """
@@ -172,7 +194,7 @@ def standard_lp_filter(raw, norm_thresh=0.5):
     # intensity = signal.filtfilt(b, a, intensity)
     return intensity
 
-def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_prom_scale=0.5, auto_thresh_scale=0.5, min_width=None, max_width=None, \
+def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_prom_scale=0.5, auto_thresh_scale=0.5, auto_thresh_pct=95, min_width=None, max_width=None, \
                   baseline_start=0, baseline_duration=1000, excl=0):
     """ Analyze peaks within a given trace and return the following statistics, organized in a pandas DataFrame:
 
@@ -182,7 +204,7 @@ def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_p
 
     """
     if prominence == "auto":
-        p = np.percentile(trace, 95)*auto_prom_scale
+        p = np.nanpercentile(trace, 95)*auto_prom_scale
     elif prominence == "snr":
         noise = np.std(trace.ravel()[baseline_start:baseline_start+baseline_duration])
         print(noise)
@@ -190,7 +212,7 @@ def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_p
     else:
         p = prominence
     if threshold == "auto":
-        t = np.percentile(trace, 95)*auto_thresh_scale
+        t = np.nanpercentile(trace, auto_thresh_pct)*auto_thresh_scale
     else:
         t = threshold
         
@@ -328,7 +350,7 @@ def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
                                         np.ones(after_pad_length)*np.nan])
         spike_traces[pk_idx,:] = spike_trace
     if normalize_height:
-        spike_traces /= np.nanmax(spike_traces)
+        spike_traces /= np.nanmax(spike_traces,axis=1)[:,None]
     return spike_traces
 
 def align_fixed_offset(traces, offsets):
@@ -493,7 +515,6 @@ def masked_peak_statistics(df, mask, f_s=1, min_peaks=6, sta_stats=False, trace=
 
 def plot_mean_frequency(spike_stats_by_roi, embryos=[]):
     """ Plot mean spike frequency against developmental time
-
     """
     if len(embryos) == 0:
         embryos = spike_stats_by_roi.index.unique()
@@ -566,6 +587,7 @@ class TimelapseArrayExperiment():
         self.t = None
         self.raw = None
         self.dFF = None
+        self.dFF_noise = None
         self.missing_data = None
         self.peaks_data = None
 
@@ -600,6 +622,7 @@ class TimelapseArrayExperiment():
         t = []
         data_blocks = []
         dFF_blocks = []
+        dFF_noise_blocks = []
         background_blocks = []
 
         for idx in timepoints:
@@ -672,12 +695,16 @@ class TimelapseArrayExperiment():
             else:
                 background = np.zeros_like(data_blocks[idx])
 #             print(data_blocks[idx].shape)
-            filtered_intensity = np.apply_along_axis(filter_function, 1, data_blocks[idx])
-            dFFs = np.apply_along_axis(intensity_to_dff, 1, filtered_intensity-background)
-            dFF_blocks.append(dFFs)
+            dFFs = np.apply_along_axis(intensity_to_dff, 1, data_blocks[idx]-background)
+            dFFs_filtered = np.apply_along_axis(filter_function, 1, dFFs)
+            dFFs_noise = dFFs-dFFs_filtered
+            dFF_blocks.append(dFFs_filtered)
+            dFF_noise_blocks.append(dFFs_noise)
 
         data_blocks = np.concatenate(data_blocks, axis=1)
         dFF_blocks = np.concatenate(dFF_blocks, axis=1)
+        dFF_noise_blocks = np.concatenate(dFF_noise_blocks, axis=1)
+
         
         # Interpolate to merge all the individual blocks, and mark gaps in the data
         t = np.array(t)
@@ -690,17 +717,21 @@ class TimelapseArrayExperiment():
         
         data_interp = np.zeros((data_blocks.shape[0], len(t_interp)))
         dFF_interp = np.zeros((dFF_blocks.shape[0], len(t_interp)))
+        dFF_noise_interp = np.zeros((dFF_blocks.shape[0], len(t_interp)))
 
         for roi in range(data_interp.shape[0]):
             f_trace = interpolate.interp1d(t, data_blocks[roi,:])
             data_interp[roi,:] = f_trace(t_interp)
             f_dff = interpolate.interp1d(t, dFF_blocks[roi,:])
+            f_dff_noise = interpolate.interp1d(t, dFF_noise_blocks[roi,:])
             dFF_interp[roi,:] = f_dff(t_interp)
+            dFF_noise_interp[roi,:] = f_dff_noise(t_interp)
         
         self.filter_timepoints(timepoints)
         self.t = t_interp
         self.raw = data_interp
         self.dFF = dFF_interp
+        self.dFF_noise = dFF_noise_interp
         self.missing_data = missing_data
         self.n_rois = dFF_interp.shape[0]
         self.data_loaded = True
@@ -717,9 +748,7 @@ class TimelapseArrayExperiment():
             raise Exception("hpf or s time required")
         idx = np.argwhere(timepoint < time_array).ravel()[0] - 1
         return self.block_metadata["file_name"].iloc[idx]
-
-    def analyze_peaks(self, prominence="auto", wlen=400, threshold=0, auto_prom_scale=0.5, auto_thresh_scale=0.5, prefilter=None, min_width=None,\
-                      max_width=None,baseline_start=0,baseline_duration=1000,excl=0):
+    def analyze_peaks(self, prominence="auto", prefilter=None, baseline_start=0, baseline_duration=3000, auto_prom_scale=0.3, **peak_detect_params):
         """ Apply scipy detect_peaks on all ROIs and 
         """
         dfs = []
@@ -729,10 +758,11 @@ class TimelapseArrayExperiment():
                     trace = self.dFF[roi,:]
                 else:
                     trace = prefilter(self.dFF[roi,:])
-                df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, threshold=threshold,\
-                                   f_s=self.f_s, auto_prom_scale=auto_prom_scale, auto_thresh_scale=auto_thresh_scale,\
-                                   min_width = min_width, max_width = max_width, baseline_duration=baseline_duration,\
-                                  baseline_start = baseline_start, excl=excl)
+                if prominence == "snr":
+                    noise_level = np.std(self.dFF_noise[roi, baseline_start:baseline_duration+baseline_start])
+                    df = analyze_peaks(self.dFF[roi,:], prominence=noise_level*auto_prom_scale, f_s=self.f_s, **peak_detect_params)
+                else:
+                    df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, f_s=self.f_s, **peak_detect_params)
             except Exception as e:
                 print("ROI: %d" % roi)
                 raise e
@@ -891,9 +921,13 @@ class TimelapseArrayExperiment():
             ax = axes[idx,0]
             if roi in self.peaks_data.index.unique():
                 roi_peaks = self.peaks_data.loc[roi]
-                peak_indices = roi_peaks["peak_idx"]
+                try:
+                    peak_indices = roi_peaks[["peak_idx"]].values.astype(int)
+                except Exception as e:
+                    print(roi_peaks[["peak_idx"]])
+                    raise e
                 ax.plot(t, self.dFF[roi,:])
-                if len(np.array([peak_indices])) > 0:
+                if len(peak_indices) > 0 and np.all(peak_indices>=0):
                     ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
             ax.set_xlabel("Time (%s)" % time)
             ax.set_ylabel(r"$\Delta F/F$")

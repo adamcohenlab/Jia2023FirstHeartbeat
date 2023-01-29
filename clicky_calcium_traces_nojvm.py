@@ -57,7 +57,7 @@ for file_path in files:
         filename = os.path.splitext(os.path.basename(file_path))[0]
         file_path_1 = file_path
 
-    img = utils.standardize_n_dims(imread(file_path_1), missing_dims=[1,2])
+    img = utils.standardize_n_dims(imread(file_path_1).astype(np.float32), missing_dims=[1,2])
     n_timepoints = img.shape[0]
 
 

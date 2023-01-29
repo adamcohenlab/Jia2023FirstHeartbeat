@@ -58,6 +58,8 @@ def load_image(rootdir, expt_name, subfolder="", raw=True):
             
             rawpath = os.path.join(rootdir, subfolder, expt_name, "frames.bin")
             if not os.path.exists(rawpath):
+                rawpath = os.path.join(rootdir, subfolder, expt_name, "frames1.bin")
+            if not os.path.exists(rawpath):
                 rawpath = os.path.join(rootdir, subfolder, expt_name, "Sq_camera.bin")
             img = np.fromfile(rawpath, dtype=np.dtype("<u2")).reshape((-1,width,height))
         except Exception as e:
@@ -466,8 +468,8 @@ def spline_fit_single_trace(trace, s, knots, plot=False, n_iterations=100, eps=0
             else:
                 max_deriv_interp = np.nan
             
-        except Exception as e:
-            print(e)
+        except IndexError as e:
+            # print(e)
             beta = np.nan*np.ones(5)
             return beta, spl
         if plot:
@@ -496,7 +498,7 @@ def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
     beta = np.concatenate([beta, noise_estimate[np.newaxis,:,:]], axis=0)
     return beta, smoothed_vid
 
-def process_isochrones(beta, dt, threshold=None, plot=False, intensity_mask=None, threshold_mode="amplitude", med_filt_size=3, opening_size=3, closing_size=3):
+def process_isochrones(beta, dt, threshold=None, plot=False, intensity_mask=None, threshold_mode="amplitude", med_filt_size=3, opening_size=3, closing_size=3, amplitude_artifact_cutoff=2.5, dilation_size=0, valid_mask=None):
     """ Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude values 
     """
     
@@ -504,41 +506,44 @@ def process_isochrones(beta, dt, threshold=None, plot=False, intensity_mask=None
         amplitude = beta[2,:,:]
     elif threshold_mode == "snr":
         amplitude = (np.abs(beta[2] - 1)/beta[5])**2
-    
-    amplitude_nanr = np.copy(amplitude)
-    amplitude_nanr[beta[2] > 2.5] = np.nan
-    minval = np.nanmin(amplitude)
-    amplitude_nanr[np.isnan(amplitude_nanr)] = minval
-    # thresh = (np.percentile(amplitude_nanr,90)-1)*pct_threshold/100+1
-    amplitude_nanr =  ndimage.gaussian_filter(amplitude_nanr,\
-            sigma=3)
-    if threshold is None:
-        threshold = min(max(filters.threshold_triangle(amplitude_nanr), 2), 100)
-    if intensity_mask is None:
-        intensity_mask = np.ones_like(amplitude, dtype=bool)
+    if valid_mask is None:
+        amplitude_nanr = np.copy(amplitude)
+        amplitude_nanr[beta[2] > amplitude_artifact_cutoff] = np.nan
+        minval = np.nanmin(amplitude)
+        amplitude_nanr[np.isnan(amplitude_nanr)] = minval
+        # thresh = (np.percentile(amplitude_nanr,90)-1)*pct_threshold/100+1
+        amplitude_nanr =  ndimage.gaussian_filter(amplitude_nanr,\
+                sigma=3)
+        if threshold is None:
+            threshold = min(max(filters.threshold_triangle(amplitude_nanr), 2), 100)
+        if intensity_mask is None:
+            intensity_mask = np.ones_like(amplitude, dtype=bool)
+        # print(threshold)
+        # thresh = filters.threshold_otsu(amplitude_nanr)
+        mask = (amplitude_nanr>threshold) & intensity_mask
+        if plot:
+            fig1, ax1 = plt.subplots(figsize=(3,3))
+            visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax = ax1)
+        if opening_size > 0:
+            mask = morphology.binary_opening(mask, selem=morphology.disk(opening_size))
+        if closing_size > 0:
+            mask = morphology.binary_closing(mask, selem=morphology.disk(closing_size))
+        
 
-    # thresh = filters.threshold_otsu(amplitude_nanr)
-    mask = (amplitude_nanr>threshold) & intensity_mask
-    if plot:
-        fig1, ax1 = plt.subplots(figsize=(3,3))
-        visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax = ax1)
-    if opening_size > 0:
-        mask = morphology.binary_opening(mask, selem=morphology.disk(opening_size))
-    if closing_size > 0:
-        mask = morphology.binary_closing(mask, selem=morphology.disk(closing_size))
-    
-    labels = measure.label(mask)
-    label_values, counts = np.unique(labels, return_counts=True)
-    label_values = label_values[1:]
-    counts = counts[1:]
-    try:
-        mask = labels == label_values[np.argmax(counts)]
-    except Exception as e:
-        mask = np.zeros_like(amplitude, dtype=bool)
-    
-    if plot:
-        fig1, ax1 = plt.subplots(figsize=(3,3))
-        visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax = ax1)
+        labels = measure.label(mask)
+        label_values, counts = np.unique(labels, return_counts=True)
+        label_values = label_values[1:]
+        counts = counts[1:]
+        try:
+            valid_mask = labels == label_values[np.argmax(counts)]
+            if dilation_size > 0:
+                valid_mask = morphology.binary_dilation(valid_mask, selem=morphology.disk(dilation_size))
+        except Exception as e:
+            valid_mask = np.zeros_like(amplitude, dtype=bool)
+        
+        if plot:
+            fig1, ax1 = plt.subplots(figsize=(3,3))
+            visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax = ax1)
     
     hm = beta[1,:,:]
     dv = beta[4,:,:]
@@ -548,15 +553,28 @@ def process_isochrones(beta, dt, threshold=None, plot=False, intensity_mask=None
     
     hm_smoothed = ndimage.median_filter(hm_nans_removed, size=med_filt_size)
     hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1)
-    hm_smoothed[~mask] = np.nan
+    hm_smoothed[~valid_mask] = np.nan
     hm_smoothed *= dt*1000
     
     dv_smoothed = ndimage.median_filter(dv_nans_removed, size=med_filt_size)
     dv_smoothed = ndimage.gaussian_filter(dv_smoothed, sigma=1)
-    dv_smoothed[~mask] = np.nan
+    dv_smoothed[~valid_mask] = np.nan
     dv_smoothed *= dt*1000
     
     return hm_smoothed, dv_smoothed
+
+def clamp_intensity(img, pctiles=[2,99]):
+    min_val, max_val = np.nanpercentile(img, pctiles)
+    processed_img = np.copy(img)
+    processed_img[processed_img > max_val] = max_val
+    processed_img[processed_img < min_val] = min_val
+    return processed_img
+
+def normalize_and_clamp(img, pctile=99):
+    processed_img = img/np.nanpercentile(img, pctile)
+    processed_img[processed_img > 1] = 1
+    processed_img[processed_img < 0] = 0
+    return processed_img
 
 def remove_nans(img, kernel_size=3):
     """ Replace NaNs in a 2D image with an average of surrounding values
@@ -644,6 +662,8 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, amplitude_
         mean_trace = image_to_trace(raw_img, mask)
         _, pbleach = traces.correct_photobleach(mean_trace, method=method, nsamps=nsamps)
         corrected_img = np.divide(raw_img, pbleach[:,np.newaxis,np.newaxis])
+        if return_params:
+            return corrected_img, pbleach
         # print(corrected_img.shape)
 
     elif method == "monoexp":
@@ -709,11 +729,11 @@ def correct_photobleach(img, mask=None, method="localmin", nsamps=51, amplitude_
     return corrected_img
     
 
-def get_image_dFF(img, baseline_percentile=10):
+def get_image_dFF(img, baseline_percentile=10, t_range=(0,-1)):
     """ Convert a raw image into dF/F
 
     """
-    baseline = np.percentile(img, baseline_percentile, axis=0)
+    baseline = np.percentile(img[t_range[0]:t_range[1]], baseline_percentile, axis=0)
     dFF = img/baseline
     return dFF
 
@@ -730,7 +750,7 @@ def get_spike_videos(img, peak_indices, before, after, normalize_height=True):
                                                 img[max(0, pk-before):min(img.shape[0],pk+after),:,:],
                                         np.ones((after_pad_length,img.shape[1],img.shape[2]))*np.nan])
         if normalize_height:
-            spike_img /= np.nanmax(spike_img)
+            spike_img /= np.nanpercentile(spike_img,99)
         try:
             spike_imgs[pk_idx,:,:,:] = spike_img
         except Exception as e:
@@ -862,12 +882,40 @@ def get_image_dff_corrected(img, nsamps_corr, mask=None, plot=None, full_output=
         return dFF_img, mask
     else:
         return dFF_img
+
+def image_to_peaks(img, mask=None, prom_pct=90, exclude_pks=None, fs=1, min_width_s=0.5, f_c=2.5, **peak_detect_params):
+    """ Detect spike events in image
+    """
     
+    if mask is None:
+        mean_img = img.mean(axis=0)
+        mask = mean_img > np.percentile(mean_img, 80)
+        kernel_size = int(mask.shape[0]/50)
+        mask = morphology.binary_closing(mask, selem=np.ones((kernel_size, kernel_size)))
+    
+    sos = signal.butter(5, f_c, btype="lowpass", \
+                        output="sos",fs=fs)
+    
+    mask_trace = image_to_trace(img, mask=np.tile(mask, (img.shape[0], 1, 1)))
+    mask_trace = signal.sosfiltfilt(sos, mask_trace)
+    ps = np.percentile(mask_trace,[10,prom_pct])
+    prominence = ps[1] - ps[0]
+    
+    pks, _ = signal.find_peaks(mask_trace, prominence=prominence, width=(int(min_width_s*fs), None), rel_height=0.8, **peak_detect_params)
+    
+    if exclude_pks:
+        keep = np.ones(len(pks), dtype=bool)
+        keep[exclude_pks] = 0
+        pks = pks[keep]
+        
+    return pks, mask_trace
+    
+
     
 def image_to_sta(raw_img, fs=1, mask=None, plot=False, \
                  savedir=None, prom_pct=90, sta_bounds="auto", \
                  exclude_pks = None, offset=0, normalize_height=True, \
-                 full_output=False):
+                 full_output=False, min_width_s=0.5):
     """ Convert raw image into spike triggered average
     """
     if savedir is not None:
@@ -890,25 +938,14 @@ def image_to_sta(raw_img, fs=1, mask=None, plot=False, \
     # convert to DF/F
     
     dFF_img = get_image_dFF(raw_img)
+    pks, dFF_mean = image_to_peaks(dFF_img-1, mask=mask, prom_pct=prom_pct, fs=fs, exclude_pks=exclude_pks, min_width_s=min_width_s)
     
     if savedir:
         skio.imsave(os.path.join(savedir, "dFF.tif"), dFF_img.astype(np.float32))
         skio.imsave(os.path.join(savedir, "dFF_display.tif"), exposure.rescale_intensity(dFF_img, out_range=(0,255)).astype(np.uint8))
 
     dFF_mean = image_to_trace(dFF_img, mask=np.tile(mask, (dFF_img.shape[0], 1, 1)))
-    axes[1].plot(np.arange(dFF_img.shape[0])/fs, dFF_mean-1, color="C2")
-    sos = signal.butter(5, 2.5, btype="lowpass", \
-                        output="sos",fs=fs)
-    dFF_mean = signal.sosfiltfilt(sos, dFF_mean-1)
-    # Identify spikes
-    ps = np.percentile(dFF_mean,[10,prom_pct])
-    prominence = ps[1] - ps[0]
-    pks, _ = signal.find_peaks(dFF_mean, prominence=prominence, width=(int(0.5*fs), None))
-    
-    if exclude_pks:
-        keep = np.ones(len(pks), dtype=bool)
-        keep[exclude_pks] = 0
-        pks = pks[keep]
+    axes[1].plot(np.arange(dFF_img.shape[0])/fs, dFF_mean, color="C2")
 
     if plot:
         axes[1].plot(np.arange(dFF_img.shape[0])/fs, dFF_mean)
@@ -1013,27 +1050,29 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
 #     new_mask_labels = np.deepcopy(initial_guesses)
     n_rois = np.max(initial_guesses)
     corr_img = np.zeros((n_rois, mean_img.shape[0], mean_img.shape[1]), dtype=float)
-    
-    for i in range(1, n_rois+1):
-        bbox = bboxes[i-1]
-        r1 = max(bbox[0]-bbox_offset, 0)
-        c1 = max(bbox[1]-bbox_offset, 0)
-        r2 = min(bbox[2]+bbox_offset, initial_guesses.shape[0])
-        c2 = min(bbox[3]+bbox_offset, initial_guesses.shape[1])
-#         print(r1,r2,c1,c2)
-        roi_mask = np.zeros_like(initial_guesses, dtype=bool)
-        roi_mask[r1:r2, c1:c2] = 1    
-        initial_trace = image_to_trace(zeroed_image, mask = roi_mask)
-        roi_traces = zeroed_image[:,roi_mask]
-#         print(roi_traces.shape)
-        corrs = np.apply_along_axis(lambda x: stats.pearsonr(initial_trace, x)[0], 0, roi_traces)
-        corrs = corrs.reshape((r2-r1, c2-c1))
-        corr_img[i-1, r1:r2, c1:c2] = corrs
-        
-    corr_mask = morphology.binary_opening(np.max(corr_img>corr_threshold, axis=0), selem=np.ones((opening_size,opening_size)))
-    new_mask = morphology.binary_dilation(corr_mask, selem=np.ones((dilation_size, dilation_size)))
-    new_mask_labels = measure.label(new_mask)
+    if corr_threshold == "None":
+        new_mask = initial_guesses.astype(bool)
+    else:
+        corr_threshold = float(corr_threshold)
+        for i in range(1, n_rois+1):
+            bbox = bboxes[i-1]
+            r1 = max(bbox[0]-bbox_offset, 0)
+            c1 = max(bbox[1]-bbox_offset, 0)
+            r2 = min(bbox[2]+bbox_offset, initial_guesses.shape[0])
+            c2 = min(bbox[3]+bbox_offset, initial_guesses.shape[1])
+    #         print(r1,r2,c1,c2)
+            roi_mask = np.zeros_like(initial_guesses, dtype=bool)
+            roi_mask[r1:r2, c1:c2] = 1    
+            initial_trace = image_to_trace(zeroed_image, mask = roi_mask)
+            roi_traces = zeroed_image[:,roi_mask]
+    #         print(roi_traces.shape)
+            corrs = np.apply_along_axis(lambda x: stats.pearsonr(initial_trace, x)[0], 0, roi_traces)
+            corrs = corrs.reshape((r2-r1, c2-c1))
+            corr_img[i-1, r1:r2, c1:c2] = corrs
 
+        corr_mask = morphology.binary_opening(np.max(corr_img>corr_threshold, axis=0), selem=np.ones((opening_size,opening_size)))
+        new_mask = morphology.binary_dilation(corr_mask, selem=morphology.disk(dilation_size))
+    new_mask_labels = measure.label(new_mask)
     coms = ndi.center_of_mass(new_mask, labels=new_mask_labels, index=np.arange(1,np.max(new_mask_labels)+1))
     coms = np.array(coms)
 
@@ -1041,14 +1080,17 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
     return new_mask_labels, coms
 
 def segment_by_frequency_band(img, band_bounds, f_s=1, band_threshold=0.45,\
-                    block_size=375, offset=5):
+                    block_size=375, offset=5, manual_intensity_mask=None):
     """ Get segmentation by relative power content within a range of frequencies
     """
     mean_img = img.mean(axis=0)
     zeroed_image = img-mean_img
-    local_thresh = filters.threshold_local(mean_img, block_size=block_size, offset=offset)
-    # intensity_mask = mean_img > np.percentile(mean_img, intensity_threshold*100)
-    intensity_mask = mean_img > local_thresh
+    if manual_intensity_mask is None:
+        local_thresh = filters.threshold_local(mean_img, block_size=block_size, offset=offset)
+        # intensity_mask = mean_img > np.percentile(mean_img, intensity_threshold*100)
+        intensity_mask = mean_img > local_thresh
+    else:
+        intensity_mask = manual_intensity_mask
     
     pixelwise_fft = fft(zeroed_image, axis=0)
     N_samps = img.shape[0]

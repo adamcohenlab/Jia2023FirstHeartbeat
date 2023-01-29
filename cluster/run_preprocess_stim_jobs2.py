@@ -56,7 +56,7 @@ for i in range(expt_info.shape[0]):
     #         bg_const += 17.549021818391
     #     else:
     #         bg_const += 37.3174772081532
-    sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_stim2.sh", rootpath, f, args.crosstalk_channel, output_dir, str(args.remove_from_start),\
+    sh_line = ["sbatch", "/n/holyscratch01/cohen_lab/bjia/SpikeCounter/cluster/preprocess_stim2.sh", rootpath, f, args.crosstalk_channel, output_dir, str(args.remove_from_start),\
               str(args.remove_from_end), str(args.scale_factor),\
               str(args.start_from_downsampled), str(args.n_pcs), str(args.skewness_threshold), str(args.left_shoulder_freq), str(args.right_shoulder_freq), str(int(args.invert)), args.pb_correct_method, str(args.lpad), str(args.rpad), args.decorr_pct, args.pb_correct_mask, str(args.denoise), str(args.decorrelate), str(bg_const)]
     print(sh_line)

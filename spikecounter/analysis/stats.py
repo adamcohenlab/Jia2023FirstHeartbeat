@@ -18,7 +18,7 @@ def ks_window(data, window, overlap=0.5):
 
 
 ### Fitting routines for frequency/CV data to simulated moments
-def correct_cov(cov, rs, ksize=5):
+def correct_cov(cov, rs, ksize=5, critical_point=1):
     """Correct for low sample number in coefficient of variation calculation from simulations at parameters far from bifurcation. We
     assume that because the spike arrivals are sufficiently rare the CV = 1.
     
@@ -29,7 +29,7 @@ def correct_cov(cov, rs, ksize=5):
     try:
         # Starting from high I, check when the CV starts to decrease again (it shouldn't decrease when I is far from bifurcation)
         try:
-            idx = np.argwhere((diff<0)*(fliprs<1)).ravel()[0]
+            idx = np.argwhere((diff<0)*(fliprs<critical_point)).ravel()[0]
         except Exception as e:
             # print(fliprs)
             # print(diff)
@@ -101,7 +101,73 @@ def gen_exptdata(freq_trace, cov_trace, plot=False, n_points_offset=0, min_windo
     xvals = np.arange(len(covdata))
     return covdata, finterp, xvals, last_nan_before_cov
 
-def gen_fitfun(xvals_sim, f_sim, cv_sim, x_offset_pre, x_offset_post, scale_factors, relweight=1):
+def gen_fitfun(xvals_sim, f_sim, cv_sim, x_offset_pre, x_offset_post, scale_factors, relweight=1, critical_point=1):
+    ### Here covdata and fdata are Nx2 arrays of the experimental data
+    if critical_point is None:
+        ccov = cv_sim
+    else:
+        ccov = correct_cov(cv_sim, xvals_sim, critical_point=critical_point)
+    valid_sim_points = np.isfinite(f_sim) & np.isfinite(ccov)
+    f_lookup = interpolate.interp1d(xvals_sim[valid_sim_points], f_sim[valid_sim_points], fill_value=0, bounds_error=False)
+    # cov_lookup = interpolate.interp1d(xvals_sim[valid_sim_points], ccov[valid_sim_points], fill_value="extrapolate")
+    cov_lookup = interpolate.interp1d(xvals_sim[valid_sim_points], ccov[valid_sim_points], fill_value=np.nanmax(ccov[valid_sim_points]), bounds_error=False)
+
+
+    def fit_function(params, x=None, dat1=None, dat2=None):
+        freq_valid = ~np.isnan(dat1)
+        cov_valid = ~np.isnan(dat2)
+        x_valid_freq = x[freq_valid]
+        x_valid_cov = x[cov_valid]
+        r_est_f = params['x_scale']/scale_factors[0]*(x_valid_freq-x_offset_pre) +\
+                          params['x_offset']/scale_factors[2]-x_offset_post
+        r_est_cov = params['x_scale']/scale_factors[0]*(x_valid_cov-x_offset_pre) +\
+                            params['x_offset']/scale_factors[2]-x_offset_post
+        model1 = f_lookup(r_est_f)
+        model2 = cov_lookup(r_est_cov)
+
+                                                                        
+        resid1 = (params['amplitude']/scale_factors[1]*dat1[freq_valid] - model1)*scale_factors[1]/np.sqrt(np.sum(freq_valid))
+        resid2 = (dat2[cov_valid] - model2)*relweight/np.sqrt(np.sum(cov_valid))
+        # fig1, axes = plt.subplots(1,2,figsize=(8,4))
+        # fig1.suptitle(params['amplitude'])
+        # axes[0].plot(r_est_f, model1)
+        # axes[0].plot(r_est_f, params['amplitude']/scale_factors[1]*dat1[freq_valid])
+        # axes[0].set_title(np.nansum((params['amplitude']/scale_factors[1]*dat1[freq_valid] - model1)**2))
+        # axes[1].plot(r_est_cov, model2)
+        # axes[1].plot(r_est_cov, dat2[cov_valid])
+        # axes[1].set_title(np.nansum((dat2[cov_valid] - model2)**2))
+        return np.concatenate((resid1, resid2))
+    return fit_function, f_lookup, cov_lookup
+
+def gen_fitfun_l1(xvals_sim, f_sim, cv_sim, x_offset_pre, x_offset_post, scale_factors, relweight=1, critical_point=1):
+    ### Here covdata and fdata are Nx2 arrays of the experimental data
+    if critical_point is None:
+        ccov = cv_sim
+    else:
+        ccov = correct_cov(cv_sim, xvals_sim, critical_point=critical_point)
+    valid_sim_points = np.isfinite(f_sim) & np.isfinite(ccov)
+    f_lookup = interpolate.interp1d(xvals_sim[valid_sim_points], f_sim[valid_sim_points], fill_value="extrapolate")
+    cov_lookup = interpolate.interp1d(xvals_sim[valid_sim_points], ccov[valid_sim_points], fill_value="extrapolate")
+
+    def fit_function(params, x=None, dat1=None, dat2=None):
+        freq_valid = ~np.isnan(dat1)
+        cov_valid = ~np.isnan(dat2)
+        x_valid_freq = x[freq_valid]
+        x_valid_cov = x[cov_valid]
+        r_est_f = params['x_scale']/scale_factors[0]*(x_valid_freq-x_offset_pre) +\
+                          params['x_offset']/scale_factors[2]-x_offset_post
+        r_est_cov = params['x_scale']/scale_factors[0]*(x_valid_cov-x_offset_pre) +\
+                            params['x_offset']/scale_factors[2]-x_offset_post
+        model1 = f_lookup(r_est_f)
+        model2 = cov_lookup(r_est_cov)
+        resid1 = (params['amplitude']/scale_factors[1]*dat1[freq_valid] - model1)*scale_factors[1]
+        resid1 = np.sign(resid1)*np.sqrt(np.abs(resid1))
+        resid2 = (dat2[cov_valid] - model2)
+        resid2 = np.sign(resid2)*np.sqrt(np.abs(resid2))*relweight
+        return np.concatenate((resid1, resid2))
+    return fit_function, f_lookup, cov_lookup
+
+def gen_fitfun_weighted_cauchy(xvals_sim, f_sim, cv_sim, x_offset_pre, x_offset_post, scale_factors, maxdiff_freq, maxdiff_cov, relweight=1):
     ### Here covdata and fdata are Nx2 arrays of the experimental data
     
     ccov = correct_cov(cv_sim, xvals_sim)
@@ -114,14 +180,20 @@ def gen_fitfun(xvals_sim, f_sim, cv_sim, x_offset_pre, x_offset_post, scale_fact
         cov_valid = ~np.isnan(dat2)
         x_valid_freq = x[freq_valid]
         x_valid_cov = x[cov_valid]
-        model1 = f_lookup(params['x_scale']/scale_factors[0]*(x_valid_freq-x_offset_pre) +\
-                          params['x_offset']/scale_factors[2]-x_offset_post)
-        model2 = cov_lookup(params['x_scale']/scale_factors[0]*(x_valid_cov-x_offset_pre) +\
-                            params['x_offset']/scale_factors[2]-x_offset_post)
-        resid1 = (params['amplitude']/scale_factors[1]*dat1[freq_valid] - model1)
-        resid2 = (dat2[cov_valid] - model2)*relweight
+        r_est_f = params['x_scale']/scale_factors[0]*(x_valid_freq-x_offset_pre) +\
+                          params['x_offset']/scale_factors[2]-x_offset_post
+        r_est_cov = params['x_scale']/scale_factors[0]*(x_valid_cov-x_offset_pre) +\
+                            params['x_offset']/scale_factors[2]-x_offset_post
+        # print(maxdiff_freq)
+        weights_f = stats.cauchy.pdf(r_est_f, loc=maxdiff_freq, scale=0.05)/stats.cauchy.pdf(0, scale=0.05)
+        weights_cov = stats.cauchy.pdf(r_est_cov, loc=maxdiff_cov, scale=0.05)/stats.cauchy.pdf(0, scale=0.05)
+        model1 = f_lookup(r_est_f)
+        model2 = cov_lookup(r_est_cov)
+        resid1 = (params['amplitude']/scale_factors[1]*dat1[freq_valid] - model1)*weights_f
+        resid2 = (dat2[cov_valid] - model2)*relweight*weights_cov
         return np.concatenate((resid1, resid2))
     return fit_function, f_lookup, cov_lookup
+
 
 def denoise_svd(data_matrix, n_pcs, n_initial_components=100, skewness_threshold=0):
     """ SVD a data matrix and reconstruct using the first n singular components

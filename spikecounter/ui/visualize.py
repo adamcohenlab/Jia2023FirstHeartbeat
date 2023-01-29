@@ -1,6 +1,6 @@
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib import patches
+from matplotlib import patches, colors
 from skimage.measure import regionprops
 import numpy as np
 
@@ -88,7 +88,7 @@ def plot_scalebars(ax, scalebar_params, time_unit="s", pct_f=False, newline=Fals
             f_label = r"$%.2f\Delta F/F$" % scalebar_params["ampl_scale"]
     print(f_label)
     
-    ax.text(scalebar_params["corner_x"] + xlabel_offset_x, scalebar_params["corner_y"] + xlabel_offset_y, "%d%s" % (scalebar_params["time_scale"], time_unit), size=scalebar_params["fontsize"])
+    ax.text(scalebar_params["corner_x"] + xlabel_offset_x, scalebar_params["corner_y"] + xlabel_offset_y, "%d %s" % (scalebar_params["time_scale"], time_unit), size=scalebar_params["fontsize"])
     ax.text(scalebar_params["corner_x"] + ylabel_offset_x, scalebar_params["corner_y"] + ylabel_offset_y - scalebar_params["ampl_scale"], \
             f_label, size=scalebar_params["fontsize"], rotation=90, linespacing=0.75)
     ax.add_patch(r1)
@@ -117,7 +117,7 @@ def stackplot(y, xvals=None, figsize_single=(12,1), ax=None, offset=None, cmap=N
         else:
             ax.plot(xvals, yplot[i,:] + i*offset, color=color, **plot_args)
         cs.append(color)
-    return fig1, ax, cs
+    return fig1, ax, cs, offset
 
 def plot_img_scalebar(fig, ax, x0, y0, length_um, thickness_px, pix_per_um = 1, fontsize=9, \
                   color="white", unit="\mu m", yax_direction="down", text_pos="below", scale=0.7,
@@ -127,7 +127,7 @@ def plot_img_scalebar(fig, ax, x0, y0, length_um, thickness_px, pix_per_um = 1, 
     
     if show_label:
         plt.draw()
-        label = r"$%d \mathrm{%s}$" % (length_um, unit)
+        label = r"$%d\, \mathrm{%s}$" % (length_um, unit)
         tx = ax.text(x0, y0, label, fontsize=fontsize, color=color)
         bb = tx.get_window_extent(renderer=fig.canvas.renderer)
         transf = ax.transData.inverted()
@@ -147,12 +147,12 @@ def plot_img_scalebar(fig, ax, x0, y0, length_um, thickness_px, pix_per_um = 1, 
         tx.set_position((x0_text, y0_text))
         plt.draw()
         
-def add_stims(ax, stims, start_y, width, height, color="C0"):
+def add_stims(ax, stims, start_y, width, height, stim_color="C0"):
     """ Add stim markings to plot
     """
     for st in stims:
         r = patches.Rectangle((st, start_y), width, height, color=stim_color)
-        ax1.add_patch(r)
+        ax.add_patch(r)
         
 def plot_trace_with_stim_bars(trace, stims, start_y, width, height, t=None, figsize=(12,4), trace_color="C1", stim_color="blue", scale="axis", scalebar_params=None, axis=None):
     """ Plot a trace with rectangles indicating stimulation
@@ -284,3 +284,21 @@ def plot_wave_analysis(snr, rd, Tsmoothed, Tsmoothed_dv, divergence, v, title):
 
     plt.tight_layout()
     return fig1, axes
+
+def get_custom_colormap(cmatrix, cmap_type):
+    if cmap_type == "continuous":
+        return colors.LinearSegmentedColormap.from_list("mp", cmatrix)
+    elif cmap_type == "categorical":
+        return colors.ListedColormap(cmatrix)
+    
+def tol_bright(cmap_type="categorical"):
+    cmatrix = np.array([[68,119,170],[102,204,238],[34,136,51],[204,187,68],[238,102,119],[170,51,119],[187,187,187]])/255
+    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
+
+def tol_vibrant(cmap_type="categorical"):
+    cmatrix = np.array([[0,119,187],[51,187,238],[0,153,136],[238,119,51],[204,51,17],[238,51,119],[187,187,187]])/255
+    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
+
+def tol_light(cmap_type="categorical"):
+    cmatrix = np.array([[119,170,221],[153,221,255],[68,187,153],[187,204,51],[170,170,0],[238,221,136],[238,136,102],[255,170,187],[221,221,221]])/255
+    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
