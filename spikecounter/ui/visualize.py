@@ -302,3 +302,15 @@ def tol_vibrant(cmap_type="categorical"):
 def tol_light(cmap_type="categorical"):
     cmatrix = np.array([[119,170,221],[153,221,255],[68,187,153],[187,204,51],[170,170,0],[238,221,136],[238,136,102],[255,170,187],[221,221,221]])/255
     return get_custom_colormap(cmatrix, cmap_type=cmap_type)
+
+def draw_caret(point, width, height, axis, direction="down", facecolor="red"):
+    if direction == "up":
+        triangle_height = -height
+    else:
+        triangle_height = height
+    
+    mark = patches.Polygon(np.array([point,\
+           [point[0]-width/2,point[1]+height],\
+           [point[0]+width/2,point[1]+height]]),\
+                          edgecolor=None, facecolor=facecolor, zorder=6)
+    axis.add_patch(mark)

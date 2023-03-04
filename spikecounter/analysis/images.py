@@ -1443,3 +1443,22 @@ def split_embryos(img, block_size=201, offset=0, extra_split_arrays=[],\
             processed_extra_arrays[-1].append(np.squeeze(rotated_array[:,int(row["bbox-0"]):int(row["bbox-2"]),\
                                         int(row["bbox-1"]):int(row["bbox-3"])].astype(arr.dtype)))
     return embryo_images, rotated_props, rotated_mask, processed_extra_arrays
+
+def translate_image(img, shift):
+    """ Translate an image by a shift (x,y)
+    """
+    u, v = shift
+    nr, nc = img.shape
+    row_coords, col_coords = np.meshgrid(np.arange(nr), np.arange(nc), indexing='ij')
+    return transform.warp(img, np.array([row_coords-v, col_coords-u]),\
+                                        mode="constant", cval=np.nan)
+
+def match_snap_to_data(img, ref, scale_factor = 4):
+    """ Match a snap of arbitrary size to an equally sized or smaller reference data set, assuming both ROIs are centered in camera coordinates
+    """
+    downscaled = transform.downscale_local_mean(img, (scale_factor, scale_factor))
+    diff = (downscaled.shape[0] - ref.shape[0])//2
+    if diff > 0:
+        downscaled = downscaled[diff:-diff, diff:-diff]
+    return downscaled
+
