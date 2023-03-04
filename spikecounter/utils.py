@@ -78,7 +78,7 @@ def process_experiment_metadata(expt_metadata, regexp_dict={}, dtypes={}):
             if r:
                 matches.append(r.group(0))
             else:
-                matches.append(None)
+                matches.append("None")
         new_df[key] = matches
         if key in dtypes:
             new_df[key] = new_df[key].astype(dtypes[key])
@@ -86,11 +86,13 @@ def process_experiment_metadata(expt_metadata, regexp_dict={}, dtypes={}):
     return new_df
 
 def match_experiments_to_snaps(expt_data, snap_data):
+    # print("test")
     snap_files = []
-    snap_data_by_embryo = snap_data.set_index("embryo")    
+    snap_data_by_embryo = snap_data.set_index("embryo")
     for i in range(expt_data.shape[0]):
         try:
             embryo_snap_data = snap_data_by_embryo.loc[[expt_data.iloc[i]["embryo"]]]
+            # print(embryo_snap_data)
             start_time = datetime.strptime(expt_data.iloc[i]["start_time"], "%H:%M:%S")
             # print(embryo_snap_data[["start_time"]])
             snap_times = [datetime.strptime(t, "%H:%M:%S") for t \
@@ -375,17 +377,27 @@ def closest_non_zero(arr):
     return nonzeros[min_indices]
 
 
-def pairwise_mindist(x, y):
-    """ Calculate minimum distance between each point in the list x and each point in the list y
+def pairwise_dist(x, y):
+    """ calculate euclidean distances between lists of vectors x and y, where each row is a measurement
     """
     if len(x.shape) > 1:
         pairwise_dist = np.sum(np.array([np.subtract.outer(x[:,i], y[:,i]) for i in range(x.shape[1])])**2, axis=0)**0.5
     else:
         # Assume x and y are representation of 2D vectors as complex values
         pairwise_dist = np.abs(np.subtract.outer(x, y))
+    return pairwise_dist
+
+def pairwise_mindist(x, y):
+    """ Calculate minimum distance between each point in the list x and each point in the list y
+    """
+    # Get pairwise distances between vectors in x and y
+    pairwise_dist = pairwise_dist(x, y)
+    
     # Check if x and y are identical, i.e. find the minimum distance to the point that is not itself
     if np.all(np.diag(pairwise_dist)==0):
         pairwise_dist += np.diag(np.inf*np.ones(pairwise_dist.shape[0]))
+    
+    # Get minima
     mindist_indices = np.argmin(pairwise_dist, axis=1)
     mindist = pairwise_dist[np.arange(x.shape[0]), mindist_indices]
     
