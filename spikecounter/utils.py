@@ -21,6 +21,18 @@ def round_rel_deviation(a, factor=100):
 #     print(arr, n_decimals, rounded)
     return rounded
 
+def pad_func_unpad(arr, func, pad_width, **pad_params):
+    """ Control function behavior around edge of arrays (2D)
+    """
+    padded_array = np.pad(arr, pad_width, **pad_params)
+    output = func(padded_array)
+    unpadded = output[pad_width:-pad_width,pad_width:-pad_width]
+    return unpadded
+
+def make_iterable(x):
+    try: yield from x
+    except TypeError: yield x
+
 def shiftkern(kernel, a, b, c, dt):
     """ From Hochbaum and Cohen 2012
     """
@@ -381,24 +393,24 @@ def pairwise_dist(x, y):
     """ calculate euclidean distances between lists of vectors x and y, where each row is a measurement
     """
     if len(x.shape) > 1:
-        pairwise_dist = np.sum(np.array([np.subtract.outer(x[:,i], y[:,i]) for i in range(x.shape[1])])**2, axis=0)**0.5
+        pd = np.sum(np.array([np.subtract.outer(x[:,i], y[:,i]) for i in range(x.shape[1])])**2, axis=0)**0.5
     else:
         # Assume x and y are representation of 2D vectors as complex values
-        pairwise_dist = np.abs(np.subtract.outer(x, y))
-    return pairwise_dist
+        pd = np.abs(np.subtract.outer(x, y))
+    return pd
 
 def pairwise_mindist(x, y):
     """ Calculate minimum distance between each point in the list x and each point in the list y
     """
     # Get pairwise distances between vectors in x and y
-    pairwise_dist = pairwise_dist(x, y)
+    pd = pairwise_dist(x, y)
     
     # Check if x and y are identical, i.e. find the minimum distance to the point that is not itself
-    if np.all(np.diag(pairwise_dist)==0):
-        pairwise_dist += np.diag(np.inf*np.ones(pairwise_dist.shape[0]))
+    if np.all(np.diag(pd)==0):
+        pd += np.diag(np.inf*np.ones(pd.shape[0]))
     
     # Get minima
-    mindist_indices = np.argmin(pairwise_dist, axis=1)
-    mindist = pairwise_dist[np.arange(x.shape[0]), mindist_indices]
+    mindist_indices = np.argmin(pd, axis=1)
+    mindist = pd[np.arange(x.shape[0]), mindist_indices]
     
     return mindist, mindist_indices

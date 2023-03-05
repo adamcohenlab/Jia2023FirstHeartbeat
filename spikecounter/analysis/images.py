@@ -3,11 +3,13 @@ import scipy.ndimage as ndi
 import skimage.io as skio
 from scipy import signal, stats, interpolate, optimize, ndimage
 import matplotlib.pyplot as plt
-from skimage import transform, filters, morphology, measure, draw, exposure
+from skimage import transform, filters, morphology, measure, draw, exposure, segmentation, feature
+from skimage.util import map_array
 from scipy.fft import fft, fftfreq
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.extmath import randomized_svd
+from sklearn import cluster
 import os
 import mat73
 import warnings
@@ -1377,24 +1379,45 @@ def get_regularized_mask(img, rois):
     
     return area_regularized_mask
 
-def split_embryos(img, block_size=201, offset=0, extra_split_arrays=[],\
-                  min_obj_size = 1000, manual_roi_seeds=None, manual_bbox_size=None, **threshold_params):
-    """ Use assumption that embryos lie on a grid to split a widefield video into videos for individual embryos. This is useful when panning between multiple FOVs that may not necessarily be aligned.
+def watershed_mask(mask):
     """
-    mean_img = img.mean(axis=0)
-    threshold = filters.threshold_local(mean_img, block_size, offset=offset, **threshold_params)
-    mask = mean_img > threshold
-    mask = morphology.binary_opening(mask, selem=morphology.disk(3))
+    Perform watershedding on a mask
+    """
+    dist = ndimage.distance_transform_edt(mask)
+    guess_objs = measure.label(mask)
+    guess_props = pd.DataFrame(measure.regionprops_table(guess_objs,\
+                        properties=('label','equivalent_diameter_area')))
+    median_diameter = np.median(guess_props['equivalent_diameter_area'])
+    # print(median_diameter)
+    coords = feature.peak_local_max(dist, footprint=morphology.disk(median_diameter/2*0.8), labels=mask, min_distance=int(median_diameter*0.5), exclude_border=5)
+    # fig1, ax1 = plt.subplots(figsize=(4,4))
+    # ax1.imshow(dist)
+    # ax1.plot(coords[:,1], coords[:,0], "wx")
+    # print(coords)
+    seeds = np.zeros(dist.shape, dtype=bool)
+    seeds[tuple(coords.T)] = True
+    seeds = measure.label(seeds)
+    
+    labels = segmentation.watershed(-dist, seeds, mask=mask)
+    return labels
+
+def segment_whole_embryos(img, block_size, offset, min_obj_size, **threshold_params):
+    """
+    Segment whole embryos (not hearts only) from an array experiment
+    """
+    threshold = filters.threshold_local(img, block_size, offset=offset, **threshold_params)
+    mask = img > threshold
+    radius = 7
+    mask = utils.pad_func_unpad(mask, lambda x: morphology.binary_opening(x, footprint=morphology.disk(radius)), radius, constant_values= 0)
     mask = morphology.remove_small_objects(mask, min_size=min_obj_size)
-    regions = measure.label(mask)
-    if manual_roi_seeds is not None:
-        for r in range(1, regions.max()+1):
-            if np.sum(manual_roi_seeds[regions==r])==0:
-                mask[regions==r] = 0
-    regions = measure.label(mask)
-                
-    props_table = pd.DataFrame(measure.regionprops_table(regions, properties=['label', 'centroid']))
-    centroids = np.array(props_table[["centroid-1", "centroid-0"]])
+    # Watershed
+    regions = watershed_mask(mask)
+    return mask, regions
+
+def calculate_dish_rotation(centroids):
+    """
+    Calculate angle of rotation of a dish to make all embryos face upwards
+    """
     _, mindist_indices = utils.pairwise_mindist(centroids, centroids)
     direction_vectors = centroids - centroids[mindist_indices]
 #     print(direction_vectors.shape)
@@ -1403,11 +1426,49 @@ def split_embryos(img, block_size=201, offset=0, extra_split_arrays=[],\
     direction_vectors *= sgn[:,np.newaxis]
 #     print(direction_vectors)
     theta = -np.median(np.arctan2(-direction_vectors[:,1], direction_vectors[:,0]))
+    return theta
+
+def remap_regions(regions, props):
+    """
+    Renumber regions based on known array formation (centroids may be slightly different but we want to fix them). Column changing fastest.
+    """
+    centroid_y = props["centroid-0"].to_numpy()
+    # print(centroid_y)
+    cl = cluster.AffinityPropagation().fit(centroid_y.reshape(-1,1))
+    regularized_centroid_y = np.zeros(props.shape[0])
+    for label in range(np.max(cl.labels_)+1):
+        regularized_centroid_y[cl.labels_ == label] = np.mean(centroid_y[cl.labels_ == label])
+    props["regularized_centroid-0"] = regularized_centroid_y
+    props = props.sort_values(by=["regularized_centroid-0", "centroid-1"])
+    remapped_regions = map_array(regions, props["label"].to_numpy(), np.arange(props.shape[0])+1)
+    return remapped_regions
+
+def split_embryos(img, block_size=201, offset=0, extra_split_arrays=[],\
+                  min_obj_size = 1000, manual_roi_seeds=None, manual_bbox_size=None, **threshold_params):
+    """ Use assumption that embryos lie on a grid to split a widefield video into videos for individual embryos. This is useful when panning between multiple FOVs that may not necessarily be aligned.
+    """
+    mean_img = img.mean(axis=0)
+    mask, regions = segment_whole_embryos(mean_img, block_size, offset, min_obj_size)
+    # fig1, ax1 = plt.subplots(figsize=(4,4))
+    # ax1.imshow(regions)
+    if manual_roi_seeds is not None:
+        for r in range(1, regions.max()+1):
+            if np.sum(manual_roi_seeds[regions==r])==0:
+                regions[regions==r] = 0
+        regions, _, _ = segmentation.relabel_sequential(regions)
+    # Determine rotation of embryos
+    props_table = pd.DataFrame(measure.regionprops_table(regions, properties=['label', 'centroid']))
+    centroids = np.array(props_table[["centroid-1", "centroid-0"]])
+    theta = calculate_dish_rotation(centroids)
     rotated_im = np.array([transform.rotate(img[i], theta*180/np.pi,\
                             resize=False, preserve_range=True) for i in range(img.shape[0])])
-
-    rotated_mask = transform.rotate(mask, theta*180/np.pi, cval=0, resize=False)
-    rotated_props = pd.DataFrame(measure.regionprops_table(measure.label(rotated_mask), properties=['label', 'bbox', 'centroid']))
+    # Rotate and relabel segmented objects
+    rotated_regions = transform.rotate(regions, theta*180/np.pi, cval=0, resize=False, order=0, preserve_range=True)
+    rotated_props = pd.DataFrame(measure.regionprops_table(rotated_regions, properties=['label', 'bbox', 'centroid']))
+    rotated_regions = remap_regions(rotated_regions, rotated_props)
+    rotated_props = rotated_props.sort_values(by=["regularized_centroid-0", "centroid-1"])
+    rotated_props["label"] = np.arange(rotated_props.shape[0])+1
+    
     embryo_images = []
     processed_extra_arrays = []
     for i in range(rotated_props.shape[0]):
@@ -1442,7 +1503,7 @@ def split_embryos(img, block_size=201, offset=0, extra_split_arrays=[],\
             row = rotated_props.iloc[i]
             processed_extra_arrays[-1].append(np.squeeze(rotated_array[:,int(row["bbox-0"]):int(row["bbox-2"]),\
                                         int(row["bbox-1"]):int(row["bbox-3"])].astype(arr.dtype)))
-    return embryo_images, rotated_props, rotated_mask, processed_extra_arrays
+    return embryo_images, rotated_props, rotated_regions, processed_extra_arrays
 
 def translate_image(img, shift):
     """ Translate an image by a shift (x,y)
