@@ -8,12 +8,13 @@ import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootpath", type=str)
+parser.add_argument("--expt_info", type=str, default="analysis/experiment_data.csv")
 parser.add_argument("--output_dir", default="analysis", type=str)
 
 args = parser.parse_args()
 rootpath = args.rootpath
 output_dir = args.output_dir
-expt_info = pd.read_csv(os.path.join(rootpath,"analysis","experiment_data.csv")).sort_values("start_time").reset_index()
+expt_info = pd.read_csv(os.path.join(rootpath,args.expt_info)).sort_values("start_time").reset_index()
 
 
 for f in expt_info["file_name"]:
