@@ -1,1 +1,1 @@
-all = ["traces"]
+all = ["traces", "stats", "images", "loaders"]

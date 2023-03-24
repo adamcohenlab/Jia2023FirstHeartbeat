@@ -5,7 +5,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from ipywidgets import interact
-from scipy import interpolate
+from scipy import interpolate, signal
 import re
 import pandas as pd
 import mat73
@@ -30,8 +30,11 @@ def pad_func_unpad(arr, func, pad_width, **pad_params):
     return unpadded
 
 def make_iterable(x):
-    try: yield from x
-    except TypeError: yield x
+    if type(x) is str:
+        yield x
+    else:
+        try: yield from x
+        except TypeError: yield x
 
 def shiftkern(kernel, a, b, c, dt):
     """ From Hochbaum and Cohen 2012
@@ -414,3 +417,33 @@ def pairwise_mindist(x, y):
     mindist = pd[np.arange(x.shape[0]), mindist_indices]
     
     return mindist, mindist_indices
+
+def space_average_over_time(timeseries, mask=None):
+    if mask is not None:
+        time_mask = np.zeros_like(timeseries)
+        print(time_mask.shape)
+        time_mask[0,:,:] = mask
+        for t in range(1, time_mask.shape[0]):
+            mask[mask!=0] += 1
+            time_mask[t,:,:] = mask
+        print(time_mask.max())
+    return np.array(nd.mean(timeseries, labels=time_mask, index=np.arange(1, time_mask.shape[0]+1)))
+
+def subsampled_autocorrelation(x, window_length, start_idx=0, subtract_mean=True, normalize=True, n_windows=1):
+    """ Wrapper function for scipy.signal.autocorrelation that is more human-interpretable
+    """
+    dc_offset_ref = 0
+    dc_offset_lag = 0
+    
+    ref = x[start_idx:start_idx+window_length]
+    lag = x[start_idx:start_idx+(n_windows+1)*window_length]
+    
+    if subtract_mean:
+        dc_offset_ref = np.nanmean(ref)
+        dc_offset_lag = np.nanmean(ref)
+    
+    corr = signal.correlate(ref-dc_offset_ref, lag-dc_offset_lag, mode="valid")
+    corr = np.flip(corr)
+    if normalize:
+        corr /= np.max(corr)
+    return corr

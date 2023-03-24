@@ -203,6 +203,7 @@ def analyze_peaks(trace, prominence="auto", wlen=400, threshold=0, f_s=1, auto_p
     fwhm: full-width half-maximum
 
     """
+    # print(prominence)
     if prominence == "auto":
         p = np.nanpercentile(trace, 95)*auto_prom_scale
     elif prominence == "snr":
@@ -759,7 +760,11 @@ class TimelapseArrayExperiment():
                 else:
                     trace = prefilter(self.dFF[roi,:])
                 if prominence == "snr":
-                    noise_level = np.std(self.dFF_noise[roi, baseline_start:baseline_duration+baseline_start])
+                    if np.sum(self.dFF_noise[roi, \
+                    baseline_start:baseline_duration+baseline_start]) > 0:
+                        noise_level = np.std(self.dFF_noise[roi, baseline_start:baseline_duration+baseline_start])
+                    else:
+                        noise_level = np.std(self.dFF[roi, baseline_start:baseline_duration+baseline_start])
                     df = analyze_peaks(self.dFF[roi,:], prominence=noise_level*auto_prom_scale, f_s=self.f_s, **peak_detect_params)
                 else:
                     df = analyze_peaks(self.dFF[roi,:], prominence=prominence, wlen=wlen, f_s=self.f_s, **peak_detect_params)

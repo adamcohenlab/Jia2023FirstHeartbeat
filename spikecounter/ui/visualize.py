@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib import patches, colors
 from skimage.measure import regionprops
 import numpy as np
+import pandas as pd
 
 def display_roi_overlay(img, m, textcolor="white", alpha=0.5, ax=None, cmap="gray", mask_cmap="viridis"):
     """ Display an image with a labelled integer valued overlay
@@ -314,3 +315,26 @@ def draw_caret(point, width, height, axis, direction="down", facecolor="red"):
            [point[0]+width/2,point[1]+height]]),\
                           edgecolor=None, facecolor=facecolor, zorder=6)
     axis.add_patch(mark)
+    
+def plot_heatmap(df, value, index, column, ax, norm="lin", cax="auto"):
+    """ Take a pandas dataframe where each row is a unique datapoint, 
+    generate a pivot table, and turn into a heatmap.
+    """
+    pv = pd.pivot_table(df, index=index, columns=column, values=value)
+    Z = pv.to_numpy()
+    if norm == "log":
+        norm = mpl.colors.LogNorm(vmin=np.nanmin(Z),vmax=np.nanmax(Z))
+    elif norm == "lin":
+        norm = mpl.colors.Normalize(vmin=np.nanmin(Z),vmax=np.nanmax(Z))
+    elif norm is None:
+        norm = mpl.colors.Normalize(vmin=np.nanmin(Z),vmax=np.nanmax(Z))
+    im = ax.pcolormesh(pv.columns, pv.index, Z,\
+                norm=norm)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    cbar = None
+    if cax =="auto":
+        cbar = plt.colorbar(im, ax=ax)
+    elif cax is not None:
+        cbar = plt.colorbar(im, cax=cax)
+    return ax, im, cbar

@@ -187,6 +187,9 @@ def get_bbox_images(img, mask, padding = 0):
     """ Get cropped images defined by the bounding boxes of ROIS provided by a mask
     """
     bboxes = [p["bbox"] for p in measure.regionprops(mask)]
+    # print(bboxes)
+    # print(img.shape)
+    # print(mask.shape)
     cropped_images = []
     for bbox in bboxes:
         r1 = max(bbox[0]-padding, 0)
