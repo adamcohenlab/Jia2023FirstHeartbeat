@@ -57,6 +57,8 @@ def extract_experiment_name(input_path):
     return expt_name
 
 def load_experiment_metadata(rootdir, expt_name):
+    """ Load and interpret metadata file from experiment
+    """
     if os.path.exists(os.path.join(rootdir, expt_name, "output_data_py.mat")):
         try:
             expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]

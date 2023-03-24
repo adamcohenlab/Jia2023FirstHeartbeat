@@ -2,15 +2,17 @@ function metadata_to_py(folder)
     Device_Data = load(fullfile(folder, 'output_data.mat'));
     Device_Data = Device_Data.Device_Data;
     
-    daq = load_device_data(Device_Data, "DAQ");
-    dmd_fast = load_device_data(Device_Data, "DMD_fast");
-    if isempty(dmd_fast)
-        dmd_fast = load_device_data(Device_Data, "DMD");
-    end
-    camera = load_device_data(Device_Data, "Main Camera");
-    dmd_lightcrafter = load_device_data(Device_Data, "DMD_lightcrafter");
-    confocal_output_data = load_device_data(Device_Data, "BU_2P");
+    daq = load_device_data(Device_Data, device_type="DAQ_Session");
+    daq = daq{1};
+    
+    dmds = load_device_data(Device_Data, device_type="DMD");
+    cameras = load_device_data(Device_Data, device_type="Cam_Controller");
+    confocal_output_data = load_device_data(Device_Data, device_name="BU_2P");
+    
     dd_compat_py = struct;
+    dd_compat_py.dmds = {};
+    dd_compat_py.cameras = {};
+    
     if ~isempty(confocal_output_data) && ~isempty(confocal_output_data.outputdata)
         disp(confocal_output_data.outputdata);
         dd_compat_py.confocal = struct;
@@ -44,51 +46,64 @@ function metadata_to_py(folder)
             end
         end
     end
+    for dmd = dmds
+       dd_compat_py.dmds{end+1} = dmd_to_py(dmd{:}); 
+    end
     
-    if ~isempty(dmd_fast)
-        dd_compat_py.dmd_fast = struct;
-        dd_compat_py.dmd_fast.target = dmd_fast.Target;
-        dd_compat_py.dmd_fast.tform = dmd_fast.tform.T;
-
-        invm = dmd_fast.tform.T^-1;
-        invm(:,3) = [0;0;1];
-        dd_compat_py.dmd_fast.target_image_space = imwarp(dmd_fast.Target, affine2d(invm), ...
-            'OutputView', imref2d([2048, 2048]));
+    for camera = cameras
+        dd_compat_py.cameras{end+1} = camera_to_py(camera{:});
     end
-
-    if ~isempty(camera)
-        dd_compat_py.camera = struct;
-        dd_compat_py.camera.exposuretime = camera.exposuretime;
-        dd_compat_py.camera.frames_requested = camera.frames_requested;
-        dd_compat_py.camera.roi = camera.ROI;
-        if isfield(camera, 'dropped_frames')
-            dd_compat_py.camera.dropped_frames = camera.dropped_frames;
-        else
-            dd_compat_py.camera.dropped_frames = 0;
-        end
-    end
-
     
-    if ~isempty(dmd_lightcrafter)
-       dd_compat_py.dmd_lightcrafter = struct;
-       dd_compat_py.dmd_lightcrafter.target = dmd_lightcrafter.Target;
-       dd_compat_py.dmd_lightcrafter.tform = dmd_lightcrafter.tform.T;
-       
-       
-        invm = dmd_lightcrafter.tform.T^-1;
-        invm(:,3) = [0;0;1];
-        dd_compat_py.dmd_lightcrafter.target_image_space = imwarp(dmd_lightcrafter.Target, affine2d(invm), ...
-            'OutputView', imref2d([2048, 2048]));
-    end
     save(fullfile(folder, 'output_data_py.mat'), 'dd_compat_py', '-v7.3');
 end
 
-function device = load_device_data(dd, device_name)
+function devices = load_device_data(dd, options)
+    arguments
+        dd;
+        options.device_type = [];
+        options.device_name = [];
+    end
+    
+    device_type = options.device_type;
+    device_name = options.device_name;
+    
+    devices = {};
     for i = 1:length(dd)
-       if isfield(dd{i}, "Device_Name") && dd{i}.Device_Name == device_name
-           device = dd{i};
-           return;
+       if isfield(dd{i}, "Device_Type") && ...
+           (isempty(device_type) || ~isempty(strfind(dd{i}.Device_Type,device_type))) && ...
+               (isempty(device_name) || dd{i}.Device_Name == device_name)
+           devices{end+1} = dd{i};
        end
     end
-    device = {};
+end
+
+function py_dmd = dmd_to_py(dmd)
+    py_dmd = struct;
+    py_dmd.name = char(dmd.Device_Name);
+    py_dmd.target = dmd.Target;
+    if isempty(dmd.tform)
+        py_dmd.tform = dmd.tform;
+    else
+        py_dmd.tform = dmd.tform.T;
+
+        invm = dmd.tform.T^-1;
+        invm(:,3) = [0;0;1];
+        py_dmd.target_image_space = imwarp(dmd.Target, affine2d(invm), ...
+            'OutputView', imref2d([2048, 2048]));        
+    end
+
+end
+
+function py_camera = camera_to_py(camera)
+    py_camera = struct;
+    py_camera.name = char(camera.Device_Name);
+    py_camera.max_size = camera.virtual_sensor_size;
+    py_camera.exposuretime = camera.exposuretime;
+    py_camera.frames_requested = camera.frames_requested;
+    py_camera.roi = camera.ROI;
+    if isfield(camera, 'dropped_frames')
+        py_camera.dropped_frames = camera.dropped_frames;
+    else
+        py_camera.dropped_frames = 0;
+    end
 end

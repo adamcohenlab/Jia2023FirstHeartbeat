@@ -1,5 +1,4 @@
 import numpy as np
-import scipy.ndimage as ndi
 import skimage.io as skio
 from scipy import signal, stats, interpolate, optimize, ndimage
 import matplotlib.pyplot as plt
@@ -28,17 +27,37 @@ from ..ui import visualize
 
 
 def regress_video(img, traces, regress_dc = True):
-    """ Linearly regress arbitrary traces from a video
+    """ Linearly regress arbitrary traces from a video.
+
+    Inputs:
+        img: 3D array of video data (time, x, y).
+        traces: 2D array of traces to regress (time, traces).
+        regress_dc: if True, will regress out the mean of the traces.
+    Returns:
+        regressed_video: 3D array of video data with traces regressed out (time, x, y).
     """
     data_matrix = img.reshape((img.shape[0], -1))
-    return sstats.multi_regress(data_matrix, traces, regress_dc=regress_dc).reshape(img.shape)
+    regressed_video = sstats.multi_regress(data_matrix, traces, regress_dc=regress_dc).reshape(img.shape)
+    return regressed_video
 
 def load_dmd_target(rootdir, expt_name, downsample_factor=1):
+    """ Load the DMD target image from the experiment metadata.  This is the image that the DMD is trying to project onto the screen.
+
+    Inputs:
+        rootdir: root directory of the experiment.
+        expt_name: name of the experiment (single video).
+        downsample_factor: factor by which to downsample the image. This deals with the fact that we downsample our images during 
+        processing.
+    Returns:
+        dmd_target: DMD target mask in image space.
+    """
+    # Load the .mat file containing the metadata.
     expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))["dd_compat_py"]
     width = int(expt_data["camera"]["roi"][1])
     height = int(expt_data["camera"]["roi"][3])
-    
     dmd_target = expt_data["dmd_lightcrafter"]['target_image_space']
+    
+    # DMD transformation to image space is not perfect, so we need to crop the image to get rid of the black border
     offset_x = int((dmd_target.shape[1] - width)/2)
     offset_y = int((dmd_target.shape[0] - height)/2)
     dmd_target = dmd_target[offset_y:-offset_y,offset_x:-offset_x]
@@ -47,60 +66,95 @@ def load_dmd_target(rootdir, expt_name, downsample_factor=1):
 
 
 def load_image(rootdir, expt_name, subfolder="", raw=True):
-    d = os.path.join(rootdir, subfolder)
-    
+    """ General image loading function that handles various file formats floating around in
+    Cohen lab.  If raw is True, will try to load the raw data from the .bin file.  Otherwise,
+    will try to load the tif files.  If there are multiple tif files, will concatenate them.
+
+    Inputs:
+        rootdir: root directory of the experiment.
+        expt_name: name of the experiment (single video).
+        subfolder: subfolder of the experiment (different stages of processing).
+        raw: if True, will try to load the raw data from the .bin file.  Otherwise, will try to load the tif files.
+    Returns:
+        imgs: image data.  If there is only one camera, this will be a 3D array (time, x, y).  If there are multiple cameras, this will be a list of 3D arrays.
+    """
+    d = os.path.join(rootdir, subfolder)    
     all_files = os.listdir(d)
     expt_files = 0
+    # Load the .mat file containing the metadata
     expt_data = utils.load_experiment_metadata(rootdir, expt_name)
+    imgs = []
 
     if raw:
         try:
-            width = int(expt_data["camera"]["roi"][1])
-            height = int(expt_data["camera"]["roi"][3])
-            
-            rawpath = os.path.join(rootdir, subfolder, expt_name, "frames.bin")
-            if not os.path.exists(rawpath):
-                rawpath = os.path.join(rootdir, subfolder, expt_name, "frames1.bin")
-            if not os.path.exists(rawpath):
-                rawpath = os.path.join(rootdir, subfolder, expt_name, "Sq_camera.bin")
-            img = np.fromfile(rawpath, dtype=np.dtype("<u2")).reshape((-1,width,height))
-        except Exception as e:
-            print(e)
+            # Load binary images for each camera
+            for i in range(len(expt_data["cameras"])):
+                width = int(expt_data["cameras"][i]["roi"][1])
+                height = int(expt_data["cameras"][i]["roi"][3])
+                rawpath = os.path.join(rootdir, subfolder, expt_name, "frames.bin")
+                if not os.path.exists(rawpath):
+                    rawpath = os.path.join(rootdir, subfolder, expt_name, f"frames{i+1}.bin")
+                if not os.path.exists(rawpath):
+                    rawpath = os.path.join(rootdir, subfolder, expt_name, "Sq_camera.bin")
+                imgs.append(np.fromfile(rawpath, dtype=np.dtype("<u2")).reshape((-1,height,width)))
+        except Exception as ex:
+            # If there is an error, try to load the tif files instead
+            warnings.warn("Error loading raw data, trying to load tif files instead")
+            print(ex)
             raw = False
         
     if not raw:
+        # Identify the number of tif files.
         for f in all_files:
             if expt_name in f and ".tif" in f:
                 expt_files +=1
         if expt_files == 1:
-            img = skio.imread(os.path.join(d, "%s.tif" % expt_name))
+            # If there is only one tif file, load it.
+            imgs.append(skio.imread(os.path.join(d, f"{expt_name}.tif")))
         else:
-            img = [skio.imread(os.path.join(d, "%s_block%d.tif" % (expt_name, block+1))) for block in range(expt_files)]
-            img = np.concatenate(img, axis=0)
-    if "frame_counter" in expt_data.keys():
-        fc_max = np.max(expt_data["frame_counter"])
-        if fc_max > img.shape[0]:
-            warnings.warn("%d frames dropped" % (fc_max - img.shape[0]))
-            last_tidx = img.shape[0]
-        else:
-            last_tidx = int(min(fc_max, expt_data["camera"]["frames_requested"] - expt_data["camera"]["dropped_frames"]))
-    else:
-        last_tidx = img.shape[0]
-    
-    return img[:last_tidx,:,:], expt_data
+            # If there are multiple tif files, load them and concatenate them.
+            img = [skio.imread(os.path.join(d, f"{expt_name}_block{block+1}.tif")) for block in range(expt_files)]
+            imgs.append(np.concatenate(img, axis=0))
+    if len(imgs) == 1:
+        imgs = imgs[0]
+        # if "frame_counter" in expt_data.keys():
+        #     fc_max = np.max(expt_data["frame_counter"])
+        #     if fc_max > imgs.shape[0]:
+        #         warnings.warn("%d frames dropped" % (fc_max - imgs.shape[0]))
+        #         last_tidx = imgs.shape[0]
+        #     else:
+        #         last_tidx = int(min(fc_max, expt_data["camera"]["frames_requested"] - expt_data["camera"]["dropped_frames"]))
+        # else:
+        #     last_tidx = imgs.shape[0]
+        # imgs = imgs[:last_tidx,:,:]
+    return imgs, expt_data
 
 def load_confocal_image(path, direction="both", extra_offset=2):
+    """ Load a confocal image from a .mat file, because it is stored as a DAQ output trace.
+    If direction is "fwd", will return the forward scan only.
+
+    Inputs:
+        path: path to the .mat file
+        direction: "fwd" or "both"
+        extra_offset: number of pixels to add to the shifting of reverse scan to align it with forward scan.
+            This is a hack to deal with the fact that the reverse scan is shifted by a few pixels relative to the forward scan.
+    Returns:
+        img: confocal image (z-stack).
+    """
+    # Load the .mat file containing the metadata and extract information about the scan.
     matdata = mat73.loadmat(path)['dd_compat_py']
     confocal = matdata['confocal']
     points_per_line = int(confocal["points_per_line"])
     numlines = int(confocal["numlines"])
     
+    # Turn output trace into an image
     img = confocal['PMT'].T.reshape((confocal["PMT"].shape[1], numlines, 2, points_per_line))
     
+    # If direction is "fwd", return the forward scan only.
     if direction == "fwd":
         return img[:,:,0,:]
     
-    
+    # If direction is "both", return the mean of the forward and reverse scans.
     elif direction == "both":
         fwd_scan = img[:,:,0,:]
         rev_scan = img[:,:,1,:]
@@ -110,8 +164,8 @@ def load_confocal_image(path, direction="both", extra_offset=2):
         pixel_step = reshaped_xdata[0,0,1] - reshaped_xdata[0,0,0]
         offset = np.min(np.mean(confocal["galvofbx"][:int(confocal["points_per_line"]),:],axis=1))
         
+        # Shift the reverse scan to align it with the forward scan.
         offset_pix = offset/pixel_step
-        
         offset_idx = int(np.round(-(offset_pix+extra_offset)))
         revscan_shift = np.roll(np.flip(rev_scan, axis=2), offset_idx, axis=2)
         revscan_shift[:,:,:offset_idx] = np.mean(revscan_shift, axis=(1,2))[:,np.newaxis,np.newaxis]
@@ -123,6 +177,14 @@ def load_confocal_image(path, direction="both", extra_offset=2):
         raise Exception("Not implemented")
         
 def generate_invalid_frame_indices(stim_trace):
+    """ Identify frames that are invalid due to cross-talk from blue-light stimulation.
+
+    Inputs:
+        stim_trace: 1D array of blue light stimulation trace.
+    Returns:
+        invalid_indices_camera: 1D array of indices of invalid frames.
+    """
+
     invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
     invalid_indices_camera = np.concatenate((invalid_indices_daq, invalid_indices_daq+1))
     return invalid_indices_camera
@@ -131,6 +193,12 @@ def generate_invalid_frame_indices(stim_trace):
 
 def get_all_region_data(img, mask):
     """ Turn all mask regions into pixel-time traces of intensity
+
+    Inputs:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+    Returns:
+        region_data: list of 2D arrays (timepoints x pixels) for each region.
     """
     region_pixels = []
     region_pixels = []
@@ -147,10 +215,18 @@ def get_all_region_data(img, mask):
 def get_region_data(img, mask, region_index):
     """ Turn raw image data from a specific region defined by integer-valued mask into a 2D matrix 
     (timepoints x pixels)
+
+    Inputs:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+        region_index: integer value of the region to extract.
+    Returns:
+        region_data: 2D array (timepoints x pixels) for the specified region.
     
     """
     global_coords = np.argwhere(mask==region_index)
     region_data = np.zeros((img.shape[0], global_coords.shape[0]))
+    # Loop over pixels in the region and extract the intensity values
     for px_idx in range(global_coords.shape[0]):
         px = global_coords[px_idx]
         region_data[:,px_idx] = img[:,px[0],px[1]]
@@ -159,19 +235,19 @@ def get_region_data(img, mask, region_index):
 def generate_cropped_region_image(intensity, global_coords):
     """ Turn an unraveled list of intensities back into an image based on the bounding box of
     the specified global coordinates.
-    
-    global_coords may be one of two possibilities:
-        1) Original shape of image
-        2) Explicit global coordinates of each measured intensity value
-    
+    Inputs:
+        intensity: 1D array of intensity values.
+        global_coords: defined shape of image or 2D array of explicit global coordinates (pixels x 2).
+    Returns:
+        img: 2D array of intensity values.
     """
-    if type(global_coords) is tuple:
+    if isinstance(global_coords, tuple):
         img = intensity.reshape(global_coords)
     else:
         global_coords_rezeroed = global_coords - np.min(global_coords, axis=0)
         if len(intensity.shape) == 1:
             img = np.zeros(np.max(global_coords_rezeroed, axis=0)+1)
-            for idx in range(len(intensity)):
+            for idx in range(intensity.shape[0]):
                 px = global_coords_rezeroed[idx,:]
                 img[px[0], px[1]] = intensity[idx]
         elif len(intensity.shape) == 2:
@@ -180,16 +256,20 @@ def generate_cropped_region_image(intensity, global_coords):
                 px = global_coords_rezeroed[idx,:]
                 img[:,px[0], px[1]] = intensity[:, idx]
         else:
-            raise Exception("Expected 1D or 2D array of intensities")
+            raise TypeError("Expected 1D or 2D array of intensities")
     return img
 
 def get_bbox_images(img, mask, padding = 0):
     """ Get cropped images defined by the bounding boxes of ROIS provided by a mask
+
+    Inputs:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+        padding: number of pixels to add to the bounding box on each side.
+    Returns:
+        cropped_images: list of 3D arrays (timepoints x pixels x pixels) for the bounding box defined by each region.
     """
     bboxes = [p["bbox"] for p in measure.regionprops(mask)]
-    # print(bboxes)
-    # print(img.shape)
-    # print(mask.shape)
     cropped_images = []
     for bbox in bboxes:
         r1 = max(bbox[0]-padding, 0)
@@ -201,9 +281,17 @@ def get_bbox_images(img, mask, padding = 0):
 
 def display_pca_data(pca, raw_data, gc, n_components=5):
     """ Show spatial principal components of a video and the corresponding temporal trace (dot product).
+
+    Inputs:
+        pca: sklearn.decomposition.PCA object
+        raw_data: 2D array of raw data (timepoints x pixels)
+        gc: 2D array of global coordinates (pixels x 2)
+        n_components: number of principal components to display
+    Outputs:
+        None
     """
     for i in range(n_components):
-        fig1, axes = plt.subplots(1, 2, figsize=(12,6))
+        _, axes = plt.subplots(1, 2, figsize=(12,6))
         axes = axes.ravel()
         comp = pca.components_[i]
         cropped_region_image = generate_cropped_region_image(comp, gc)
