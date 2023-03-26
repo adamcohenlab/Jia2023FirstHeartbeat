@@ -1,0 +1,62 @@
+# Matplotlib style for scientific plotting
+# This is the base style for "SciencePlots"
+# see: https://github.com/garrettj403/SciencePlots
+
+# Set color cycle: seaborn muted
+axes.prop_cycle : cycler('color', ['4878d0', 'ee854a', '00cc00', 'd65f5f', '956cb4', '8c613c', 'dc7ec0', '797979', 'd5bb67', '82c6e2'])
+
+# Set default figure size
+figure.figsize : 3.3, 2.5  # max width is 3.5 for single column
+
+# Set x axis
+xtick.direction : out
+xtick.major.size : 3
+xtick.major.width : 0.75
+xtick.minor.size : 1.5
+xtick.minor.width : 0.5
+xtick.minor.visible : False
+xtick.top : False
+
+# Set y axis
+ytick.direction : out
+ytick.major.size : 3
+ytick.major.width : 0.75
+ytick.minor.size : 1.5
+ytick.minor.width : 0.5
+ytick.minor.visible : False
+ytick.right : False
+
+# Set line widths
+axes.linewidth : 1
+grid.linewidth : 0.7
+lines.linewidth : 1
+
+# Remove legend frame
+legend.frameon : False
+
+# Always save as 'tight'
+savefig.bbox : tight
+savefig.pad_inches : 0.01
+
+# Remove top and right spines
+axes.spines.top : False
+axes.spines.right : False
+
+# Font Family
+font.family: sans-serif
+font.sans-serif: DejaVu Sans, Arial, Helvetica, Lucida Grande, Verdana, Geneva, Lucid, Avant Garde, sans-serif
+mathtext.fontset : dejavusans
+
+# Font size
+axes.labelsize: 16
+xtick.labelsize: 10
+ytick.labelsize: 10
+legend.fontsize: 14
+font.size: 12
+
+legend.framealpha: 0.8
+legend.borderpad: 0.4
+legend.borderaxespad: 0.6
+
+image.cmap: cet_CET_R1
+savefig.transparent: True
