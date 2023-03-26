@@ -26,18 +26,18 @@ from .. import utils
 from ..ui import visualize
 
 
-def regress_video(img, traces, regress_dc = True):
+def regress_video(img, trace_array, regress_dc = True):
     """ Linearly regress arbitrary traces from a video.
 
     Inputs:
         img: 3D array of video data (time, x, y).
-        traces: 2D array of traces to regress (time, traces).
+        trace_array: 2D array of traces to regress (time, traces).
         regress_dc: if True, will regress out the mean of the traces.
     Returns:
         regressed_video: 3D array of video data with traces regressed out (time, x, y).
     """
     data_matrix = img.reshape((img.shape[0], -1))
-    regressed_video = sstats.multi_regress(data_matrix, traces, regress_dc=regress_dc).reshape(img.shape)
+    regressed_video = sstats.multi_regress(data_matrix, trace_array, regress_dc=regress_dc).reshape(img.shape)
     return regressed_video
 
 def load_dmd_target(rootdir, expt_name, downsample_factor=1):
@@ -99,9 +99,9 @@ def load_image(rootdir, expt_name, subfolder="", raw=True):
                 imgs.append(np.fromfile(rawpath, dtype=np.dtype("<u2")).reshape((-1,height,width)))
         except Exception as ex:
             # If there is an error, try to load the tif files instead
-            warnings.warn("Error loading raw data, trying to load tif files instead")
-            print(ex)
             raw = False
+            warnings.warn("Error loading raw data, trying to load tif files instead")
+            warnings.warn(str(ex))
         
     if not raw:
         # Identify the number of tif files.
@@ -287,7 +287,7 @@ def display_pca_data(pca, raw_data, gc, n_components=5):
         raw_data: 2D array of raw data (timepoints x pixels)
         gc: 2D array of global coordinates (pixels x 2)
         n_components: number of principal components to display
-    Outputs:
+    Returns:
         None
     """
     for i in range(n_components):
@@ -301,11 +301,15 @@ def display_pca_data(pca, raw_data, gc, n_components=5):
         axes[1].set_title("PC Value")
         axes[1].plot(tr)
 
-def spike_mask_to_stim_index(spike_mask, pos="start"):
-    """ Convert detected spikes from crosstalk into a end of stimulation index for spike-triggered averaging
-
+def crosstalk_mask_to_stim_index(crosstalk_mask, pos="start"):
+    """ Convert detected spikes from crosstalk into an index for spike-triggered averaging. Use either upward or downward edge.
+    
+    Inputs:
+        crosstalk_mask: 1D array of boolean values indicating whether a spike was detected.
+    Returns:
+        stims: 1D array of indices corresponding to the start or end of each spike.
     """
-    diff_mask = np.diff(spike_mask.astype(int))
+    diff_mask = np.diff(crosstalk_mask.astype(int))
     if pos == "start":
         stims = np.argwhere(diff_mask==1).ravel()
     elif pos == "end":
@@ -313,7 +317,13 @@ def spike_mask_to_stim_index(spike_mask, pos="start"):
     return stims
 
 def image_to_roi_traces(img, label_mask):
-    """ Get traces from image using defined roi mask
+    """ Get traces from image using defined ROI mask, where each ROI is defined by a unique integer value.
+
+    Inputs:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        label_mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+    Returns:
+        traces: 2D array of traces (ROIs x timepoints)
     """
     labels = np.unique(label_mask)
     labels = labels[labels != 0]
@@ -321,8 +331,13 @@ def image_to_roi_traces(img, label_mask):
     return np.array(traces)
 
 def image_to_trace(img, mask = None):
-    """ Convert part of an image to a trace according to a mask
+    """ Average part of an image to a trace according to a binary mask.
     
+    Inputs:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        mask: 2D array of mask data (pixels x pixels). If None, average over entire image.
+    Returns:
+        trace: 1D array of trace values (timepoints)
     """
     if mask is None:
         trace = img.mean(axis=(1,2))
@@ -335,7 +350,13 @@ def image_to_trace(img, mask = None):
     return trace
 
 def interpolate_invalid_values(img, mask):
-    """ Interpolate invalid values pixelwise
+    """ Interpolate invalid values pixelwise. Invalid values are defined by a mask of True values.
+
+    Inputs:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        mask: 2D array of mask data (pixels x pixels). True values indicate invalid values.
+    Returns:
+        invalid_filled: 3D array of raw image data with invalid values interpolated.
     """
     xs = np.arange(img.shape[0])[~mask]
     invalid_filled = np.copy(img)
@@ -355,7 +376,7 @@ def plot_image_mean_and_stim(img, mask=None, style="line", duration=0, fs=1):
     """
     trace = image_to_trace(img, mask)
     masked_trace, spike_mask = traces.remove_stim_crosstalk(trace)
-    stim_end = spike_mask_to_stim_index(spike_mask)
+    stim_end = crosstalk_mask_to_stim_index(spike_mask)
     fig1, ax1 = plt.subplots(figsize=(12,6))
     ts = np.arange(img.shape[0])/fs
     ax1.plot(ts, trace, color="C1")
@@ -1166,7 +1187,7 @@ def identify_hearts(img, prev_coms=None, prev_mask_labels=None, fill_missing=Tru
         corr_mask = morphology.binary_opening(np.max(corr_img>corr_threshold, axis=0), selem=np.ones((opening_size,opening_size)))
         new_mask = morphology.binary_dilation(corr_mask, selem=morphology.disk(dilation_size))
     new_mask_labels = measure.label(new_mask)
-    coms = ndi.center_of_mass(new_mask, labels=new_mask_labels, index=np.arange(1,np.max(new_mask_labels)+1))
+    coms = ndimage.center_of_mass(new_mask, labels=new_mask_labels, index=np.arange(1,np.max(new_mask_labels)+1))
     coms = np.array(coms)
 
     # print(coms.shape)
@@ -1332,7 +1353,7 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
     all_curr_labels = np.unique(curr_labels)[1:]
     all_prev_labels = np.unique(prev_labels)[1:]
 
-    curr_coms = ndi.center_of_mass(curr_mask, labels=curr_labels, index=all_curr_labels)
+    curr_coms = ndimage.center_of_mass(curr_mask, labels=curr_labels, index=all_curr_labels)
     curr_coms = np.array(curr_coms)
     if len(curr_coms.shape) == 2 and len(prev_coms) > 0:
         curr_coms = curr_coms[:,0] + 1j*curr_coms[:,1]
@@ -1370,7 +1391,7 @@ def link_frames(curr_labels, prev_labels, prev_coms, radius=15, propagate_old_la
             new_labels[curr_labels == label] = starting_idx + new_rois_counter
             new_rois_counter += 1
     new_mask = new_labels > 0
-    new_coms =  ndi.center_of_mass(new_mask, labels=new_labels, index=np.unique(new_labels)[1:])
+    new_coms =  ndimage.center_of_mass(new_mask, labels=new_labels, index=np.unique(new_labels)[1:])
     new_coms = np.array(new_coms)
     try:
         new_coms = new_coms[:,0] + 1j*new_coms[:,1]
@@ -1387,7 +1408,7 @@ def link_stack(stack, step=-1, radius=15, propagate_old_labels=True):
     prev_labels = stack[curr_t+step]
     prev_mask = prev_labels > 0
     
-    prev_coms = ndi.center_of_mass(prev_mask, labels=prev_labels, index=np.arange(1,np.max(prev_labels)+1))
+    prev_coms = ndimage.center_of_mass(prev_mask, labels=prev_labels, index=np.arange(1,np.max(prev_labels)+1))
     prev_coms = np.array(prev_coms)
     if len(prev_coms.shape)==2:
         prev_coms = prev_coms[:,0] + 1j*prev_coms[:,1]
