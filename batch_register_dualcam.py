@@ -34,13 +34,15 @@ for d in os.listdir(datadir):
     if os.path.isdir(os.path.join(datadir, d)) and os.path.exists(os.path.join(datadir, d, "output_data_py.mat")):
         expt_name = d
         print(expt_name)
-        if output_dir == "None":
-            output_dir = os.path.join(datadir, expt_name)
+        output_dir = os.path.join(datadir, expt_name)
+        print(output_dir)
 
         # Load list of images
         imgs, expt_data = images.load_image(datadir, expt_name)
         print(imgs[0].shape, imgs[0].dtype)
         print(imgs[1].shape, imgs[0].dtype)
+        if len(expt_data["cameras"]) < 2:
+            continue
 
         # Get information about the ROI positions and sizes relative to the full frame
         cam1_max_size = int(expt_data["cameras"][0]["max_size"])
