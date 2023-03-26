@@ -269,4 +269,5 @@ dependencies:
       - frozendict==2.3.6
       - h5py==3.8.0
       - mat73==0.60
+      - parse==1.19.0
 prefix: /home/billj/miniconda3/envs/bjia2
