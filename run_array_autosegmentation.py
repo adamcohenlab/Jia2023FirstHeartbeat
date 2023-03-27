@@ -45,7 +45,7 @@ skio.imsave(os.path.join(args.data_folder, "analysis", "unlinked_segmentation_vi
 linked_vid = images.link_stack(vid)
 
 filtered_vid = images.filter_by_appearances(linked_vid, vid, threshold = 0.15)
-filled_vid = images.fill_missing(filtered_vid)
+filled_vid = images.fill_missing_timepoints(filtered_vid)
 forward_time_vid = np.flip(filled_vid, axis=0)
 
 

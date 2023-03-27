@@ -26,6 +26,8 @@ from . import stats as sstats
 from .. import utils
 from ..ui import visualize
 
+MAX_INT32 = np.iinfo(np.int32).max
+
 
 def regress_video(img: npt.NDArray, trace_array: npt.NDArray,\
                    regress_dc: bool = True) -> npt.NDArray:
@@ -1621,20 +1623,31 @@ def filter_by_appearances(linked_vid, unlinked_vid, threshold=1/3):
     return filtered_vid
 
 
-def fill_missing(vid, threshold=100):
-    """ Detect when an ROI drops out of a sequence of movies
+def fill_missing_timepoints(vid: npt.NDArray, min_size: int = 100,
+                 max_size: int = MAX_INT32):
+    """ Detect when an ROI drops out of a sequence of movies. This is when
+    it becomes too big or too small. Fill in the missing frames with the ROI
+    nearest in time that is not too big or too small.
+
+    Args:
+        vid: 3D array of ROIs
+        min_size: minimum size of an ROI to be considered valid
+        max_size: maximum size of an ROI to be considered valid
+    Returns:
+        A 3D array of ROIs with missing frames filled in.
     """
     roi_sizes = []
     for roi in range(1, np.max(vid)+1):
         roi_sizes.append(np.sum(vid == roi, axis=(1, 2)))
     roi_sizes = np.array(roi_sizes).reshape(-1, vid.shape[0])
 
-    below_threshold = roi_sizes < threshold
+    valid_roi_tpoints = (roi_sizes >= min_size) & (roi_sizes <= max_size)
     try:
         closest_above_threshold = np.apply_along_axis(
-            utils.closest_non_zero, 1, ~below_threshold).squeeze()
-    except Exception as e:
+            utils.closest_non_zero, 1, valid_roi_tpoints).squeeze()
+    except ValueError:
         return vid
+    
     closest_above_threshold = closest_above_threshold.reshape(np.max(vid), -1)
     filled_vid = np.zeros_like(vid)
     for i in range(1, closest_above_threshold.shape[0]+1):
