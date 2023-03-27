@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from typing import Union, List, Tuple, Dict, Any
 from skimage import transform
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -56,7 +57,7 @@ def extract_experiment_name(input_path):
     expt_name = expt_name.split(".tif")[0]
     return expt_name
 
-def load_experiment_metadata(rootdir, expt_name):
+def load_experiment_metadata(rootdir: str, expt_name: str) -> Union[Dict[str, Any], None]:
     """ Load and interpret metadata file from experiment folder
 
     Args:
