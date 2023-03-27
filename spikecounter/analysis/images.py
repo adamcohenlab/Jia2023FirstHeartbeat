@@ -1,5 +1,8 @@
 import numpy as np
 import skimage.io as skio
+from typing import List, Tuple, Callable, Iterable
+from numpy import typing as npt
+
 from scipy import signal, stats, interpolate, optimize, ndimage
 import matplotlib.pyplot as plt
 from skimage import transform, filters, morphology, measure, draw, exposure, segmentation, feature
@@ -26,7 +29,8 @@ from .. import utils
 from ..ui import visualize
 
 
-def regress_video(img, trace_array, regress_dc=True):
+def regress_video(img: npt.NDArray, trace_array: npt.NDArray,\
+                   regress_dc: bool = True) -> npt.NDArray:
     """ Linearly regress arbitrary traces from a video.
 
     Args:
@@ -34,7 +38,8 @@ def regress_video(img, trace_array, regress_dc=True):
         trace_array (numpy.ndarray): 2D array of traces to regress (time, traces).
         regress_dc (bool): if True, will regress out the mean of the traces.
     Returns:
-        regressed_video: 3D array of video data with traces regressed out (time, x, y).
+        regressed_video (numpy.ndarray): 3D array of video data with traces
+                                        regressed out (time, x, y).
     """
     data_matrix = img.reshape((img.shape[0], -1))
     regressed_video = sstats.multi_regress(
@@ -42,16 +47,18 @@ def regress_video(img, trace_array, regress_dc=True):
     return regressed_video
 
 
-def load_dmd_target(rootdir, expt_name, downsample_factor=1):
-    """ Load the DMD target image from the experiment metadata.  This is the image that the DMD is trying to project onto the screen.
+def load_dmd_target(rootdir: str, expt_name: str,\
+                     downsample_factor: float = 1) -> npt.NDArray[np.bool_]:
+    """ Load the DMD target image from the experiment metadata. 
+    This is the image that the DMD is trying to project onto the screen.
 
-    Inputs:
-        rootdir: root directory of the experiment.
-        expt_name: name of the experiment (single video).
-        downsample_factor: factor by which to downsample the image. This deals with the fact that we downsample our images during 
+    Args:
+        rootdir (str): root directory of the experiment.
+        expt_name (str): name of the experiment (single video).
+        downsample_factor (float): factor by which to downsample the image. This deals with the fact that we downsample our images during 
         processing.
     Returns:
-        dmd_target: DMD target mask in image space.
+        dmd_target (numpy.ndarray[bool]): DMD target mask in image space.
     """
     # Load the .mat file containing the metadata.
     expt_data = mat73.loadmat(os.path.join(
