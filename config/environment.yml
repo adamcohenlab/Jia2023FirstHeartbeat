@@ -71,6 +71,7 @@ dependencies:
   - importlib_resources=5.2.0=pyhd3eb1b0_1
   - intel-openmp=2021.4.0=h06a4308_3561
   - ipykernel=6.19.2=py39hb070fc8_0
+  - ipympl=0.9.3=pyhd8ed1ab_0
   - ipython=8.10.0=py39h06a4308_0
   - ipython_genutils=0.2.0=pyhd3eb1b0_1
   - ipywidgets=8.0.4=py39h06a4308_0
@@ -110,6 +111,7 @@ dependencies:
   - libev=4.33=h7f8727e_1
   - libevent=2.1.12=h8f2d780_0
   - libffi=3.3=he6710b0_2
+  - libgcc=7.2.0=h69d50b8_2
   - libgcc-ng=11.2.0=h1234567_1
   - libgfortran-ng=11.2.0=h00389a5_1
   - libgfortran5=11.2.0=h1234567_1
@@ -158,6 +160,7 @@ dependencies:
   - ncurses=6.4=h6a678d5_0
   - nest-asyncio=1.5.6=py39h06a4308_0
   - networkx=2.8.4=py39h06a4308_1
+  - nodejs=6.11.2=h3db8ef7_0
   - notebook=6.5.2=py39h06a4308_0
   - notebook-shim=0.2.2=py39h06a4308_0
   - nspr=4.33=h295c915_0
@@ -269,5 +272,7 @@ dependencies:
       - frozendict==2.3.6
       - h5py==3.8.0
       - mat73==0.60
+      - opencv-contrib-python==4.7.0.72
+      - opencv-python==4.7.0.72
       - parse==1.19.0
-prefix: /home/billj/miniconda3/envs/bjia2
+prefix: /root/miniconda3/envs/bjia2
