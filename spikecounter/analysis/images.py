@@ -1,6 +1,6 @@
 import numpy as np
 import skimage.io as skio
-from typing import List, Tuple, Callable, Iterable
+from typing import Tuple, Union, Callable
 from numpy import typing as npt
 
 from scipy import signal, stats, interpolate, optimize, ndimage
@@ -20,8 +20,6 @@ import seaborn as sns
 import pickle
 import pandas as pd
 from cycler import cycler
-import traceback
-import re
 
 from . import traces
 from . import stats as sstats
@@ -261,14 +259,17 @@ def get_region_data(img, mask, region_index):
     return region_data, global_coords
 
 
-def generate_cropped_region_image(intensity, global_coords):
-    """ Turn an unraveled list of intensities back into an image based on the bounding box of
-    the specified global coordinates.
+def generate_cropped_region_image(intensity: npt.NDArray,
+    global_coords: Union[npt.NDArray, Tuple[int, int]]) -> npt.NDArray:
+    """ Turn an unraveled list of intensities back into an image based on the
+    bounding box of the specified global coordinates.
+
     Inputs:
-        intensity: 1D array of intensity values.
-        global_coords: defined shape of image or 2D array of explicit global coordinates (pixels x 2).
+        intensity (npt.ArrayLike): 1D array of intensity values.
+        global_coords (npt.NDArray): defined shape of image or 2D array of
+            explicit global coordinates (pixels x 2).
     Returns:
-        img: 2D array of intensity values.
+        img (npt.NDArray): 2D array of intensity values.
     """
     if isinstance(global_coords, tuple):
         img = intensity.reshape(global_coords)
@@ -277,14 +278,14 @@ def generate_cropped_region_image(intensity, global_coords):
         if len(intensity.shape) == 1:
             img = np.zeros(np.max(global_coords_rezeroed, axis=0)+1)
             for idx in range(intensity.shape[0]):
-                px = global_coords_rezeroed[idx, :]
-                img[px[0], px[1]] = intensity[idx]
+                curr_px = global_coords_rezeroed[idx, :]
+                img[curr_px[0], curr_px[1]] = intensity[idx]
         elif len(intensity.shape) == 2:
             img = np.zeros([intensity.shape[0]] +
                            list(np.max(global_coords_rezeroed, axis=0)+1))
             for idx in range(intensity.shape[1]):
-                px = global_coords_rezeroed[idx, :]
-                img[:, px[0], px[1]] = intensity[:, idx]
+                curr_px = global_coords_rezeroed[idx, :]
+                img[:, curr_px[0], curr_px[1]] = intensity[:, idx]
         else:
             raise TypeError("Expected 1D or 2D array of intensities")
     return img
@@ -311,28 +312,36 @@ def get_bbox_images(img, mask, padding=0):
     return cropped_images
 
 
-def display_pca_data(pca, raw_data, gc, n_components=5):
-    """ Show spatial principal components of a video and the corresponding temporal trace (dot product).
+def plot_pca_data(pca: PCA, raw_data: npt.NDArray, 
+                     gc: Union[npt.NDArray,Tuple[int, int]], 
+                     n_components: int = 5, 
+                     pc_title: Union[Callable[..., str], None] = None):
+    """ Show spatial principal components of a video and the corresponding
+    temporal trace (dot product).
 
     Inputs:
-        pca: sklearn.decomposition.PCA object
-        raw_data: 2D array of raw data (timepoints x pixels)
-        gc: 2D array of global coordinates (pixels x 2)
-        n_components: number of principal components to display
+        pca (sklearn.decomposition.PCA): sklearn.decomposition.PCA object
+        raw_data (npt.NDArray): 2D array of raw data (timepoints x pixels)
+        gc (Union[npt.NDArray, Tuple[int, int]]): 2D array of global coordinates
+            (pixels x 2) OR tuple of (rows, cols) for the shape of the image.
+        n_components (int): number of principal components to display.
+        pc_title (Union[Callable, None]): function to generate a title for
+            each principal component. If None, the default title is used.
     Returns:
         None
     """
+    if pc_title is None:
+        pc_title = lambda j, k : f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
     for i in range(n_components):
         _, axes = plt.subplots(1, 2, figsize=(12, 6))
         axes = axes.ravel()
         comp = pca.components_[i]
         cropped_region_image = generate_cropped_region_image(comp, gc)
-        tr = np.matmul(raw_data, comp)
+        dot_trace = np.matmul(raw_data, comp)
         axes[0].imshow(cropped_region_image)
-        axes[0].set_title("PC %d (Fraction Var: %.3f)" %
-                          (i+1, pca.explained_variance_ratio_[i]))
+        axes[0].set_title(pc_title(i, comp))
         axes[1].set_title("PC Value")
-        axes[1].plot(tr)
+        axes[1].plot(dot_trace)
 
 
 def crosstalk_mask_to_stim_index(crosstalk_mask, pos="start"):
@@ -1364,13 +1373,34 @@ def segment_by_pca_moments(img, n_components=40, krt_threshold=40,
     return measure.label(mask)
 
 
-def get_heart_mask(img, krt_thresh=40, corr_thresh=0.8):
-    pca = PCA(n_components=10)
+def get_heart_mask(img: npt.NDArray, n_components: int = 10,
+                   krt_thresh: float = 40,
+                   corr_thresh: float = 0.8, plot=False):
+    """ Extract a binary mask identifying a heart from an image of a
+    single embryo.
+
+    Args:
+        img: A 3D array of shape (n_frames, n_rows, n_cols) containing a video
+            of a single embryo.
+        n_components: Number of principal components to use for segmentation.
+        krt_thresh: Kurtosis threshold for identifying principal components
+            corresponding to heart dynamics.
+        corr_thresh: Correlation threshold for identifying pixels corresponding
+            to the principal components.
+        plot: If True, plot the results of the segmentation.
+    Returns:
+        A 2D boolean array of shape (n_rows, n_cols) containing the mask.
+    """
+    pca = PCA(n_components=n_components)
     datmatrix = np.copy(img).reshape(img.shape[0], -1)
     datmatrix -= np.mean(datmatrix, axis=0)
     pca.fit(datmatrix)
     krt = stats.kurtosis(pca.components_, axis=1)
+    if plot:
+        plot_pca_data(pca, datmatrix, img.shape[1:], n_components=n_components,
+                      pc_title= lambda i, comp: f"kurtosis: {krt[i]:.2f}")
     n_valid_components = np.sum(krt > krt_thresh)
+
     if n_valid_components == 0:
         return np.zeros((img.shape[1], img.shape[2]), dtype=bool)
     else:
@@ -1378,7 +1408,7 @@ def get_heart_mask(img, krt_thresh=40, corr_thresh=0.8):
         comp = np.abs(pca.components_[comp_idx].reshape(
             img.shape[1], img.shape[2]))
         rough_mask = comp > np.percentile(comp, 95)
-        test_trace = images.image_to_trace(img, mask=rough_mask)
+        test_trace = image_to_trace(img, mask=rough_mask)
         corrs = np.apply_along_axis(
             lambda x: stats.pearsonr(test_trace, x)[0], 0, datmatrix)
         corrs = corrs.reshape(img.shape[1], img.shape[2])

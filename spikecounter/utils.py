@@ -66,7 +66,7 @@ def load_experiment_metadata(rootdir: str, expt_name: str,
         expt_name (str): name of experiment folder
     
     Returns:
-        expt_data (dict): dictionary of experiment metadata
+        expt_data (Union[Dict[str, Any], None]): dictionary of experiment metadata
 
     """
     if os.path.exists(os.path.join(rootdir, expt_name, "output_data_py.mat")):

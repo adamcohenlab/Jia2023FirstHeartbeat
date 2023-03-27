@@ -1,8 +1,10 @@
+from typing import Union, Tuple, List, Any
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib import patches, colors
 from skimage.measure import regionprops
 import numpy as np
+from numpy import typing as npt
 import pandas as pd
 
 def display_roi_overlay(img, m, textcolor="white", alpha=0.5, ax=None, cmap="gray", mask_cmap="viridis"):
@@ -95,7 +97,37 @@ def plot_scalebars(ax, scalebar_params, time_unit="s", pct_f=False, newline=Fals
     ax.add_patch(r1)
     ax.add_patch(r2)
     
-def stackplot(y, xvals=None, figsize_single=(12,1), ax=None, offset=None, cmap=None, flipud=False, **plot_args):
+def stackplot(y: npt.ArrayLike, 
+              xvals: Union[npt.ArrayLike,None] = None,
+              figsize_single: Tuple[float, float] = (12,1),
+              ax: Union[mpl.axes.Axes, None] = None,
+              offset: Union[float, None] = None,
+              cmap: Union[mpl.colors.Colormap, None] = None,
+              flipud: bool = False,
+              **plot_args) -> Tuple[mpl.figure.Figure, mpl.axes.Axes, 
+                                    List[Any], float]:
+    """ Plot a collection of traces with a common x-axis offset by a constant amount.
+
+    Useful for looking at dynamics with a common time axis and similar amplitudes.
+
+    Args:
+        y (npt.ArrayLike): 2D array of traces to plot. Each row is a trace.
+        xvals (Union[npt.ArrayLike,None], optional): x-axis values. 
+            Defaults to None.
+        figsize_single (Tuple[float, float], optional): Size of each trace.
+            Defaults to (12,1).
+        ax (Union[mpl.axes.Axes, None], optional): Axis to plot on.
+            If None, creates a new figure. Defaults to None.
+        offset (Union[float, None], optional): Offset between traces.
+            If None, uses the maximum amplitude of each trace. Defaults to None.
+        cmap (Union[mpl.colors.Colormap, None], optional): Colormap to use.
+            If None, uses the default color cycle. Defaults to None.
+        flipud (bool, optional): Flip the order of the traces.
+            Defaults to False.
+        **plot_args: Additional arguments to pass to plt.plot.
+    Returns:
+        Tuple[mpl.figure.Figure, mpl.axes.Axes, List[Any], float]: Figure and axis.
+    """
     if offset is None:
         offset = np.nanmax(np.nanmax(y, axis=1) - np.nanmin(y, axis=1))
     if ax is None:
@@ -288,9 +320,9 @@ def plot_wave_analysis(snr, rd, Tsmoothed, Tsmoothed_dv, divergence, v, title):
 
 def get_custom_colormap(cmatrix, cmap_type):
     if cmap_type == "continuous":
-        return colors.LinearSegmentedColormap.from_list("mp", cmatrix)
+        return mpl.colors.LinearSegmentedColormap.from_list("mp", cmatrix)
     elif cmap_type == "categorical":
-        return colors.ListedColormap(cmatrix)
+        return mpl.colors.ListedColormap(cmatrix)
     
 def tol_bright(cmap_type="categorical"):
     cmatrix = np.array([[68,119,170],[102,204,238],[34,136,51],[204,187,68],[238,102,119],[170,51,119],[187,187,187]])/255
