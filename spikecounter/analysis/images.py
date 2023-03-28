@@ -1,10 +1,19 @@
+from pathlib import Path
+from os import PathLike
+import os
+from typing import Tuple, Union, Callable, Any
+import pickle
+import warnings
+
 import numpy as np
-import skimage.io as skio
-from typing import Tuple, Union, Callable
 from numpy import typing as npt
 
 from scipy import signal, stats, interpolate, optimize, ndimage
+from scipy.fft import fft, fftfreq
+
 import matplotlib.pyplot as plt
+
+import skimage.io as skio
 from skimage import (
     transform,
     filters,
@@ -16,20 +25,13 @@ from skimage import (
     feature,
 )
 from skimage.util import map_array
-from scipy.fft import fft, fftfreq
 from sklearn.decomposition import PCA
 from sklearn.utils.extmath import randomized_svd
 from sklearn import cluster
-import os
 import mat73
-import warnings
-import colorcet as cc
-import seaborn as sns
-import pickle
 import pandas as pd
-from cycler import cycler
 
-from . import traces, loaders
+from . import traces
 from . import stats as sstats
 from .. import utils
 from ..ui import visualize
@@ -58,13 +60,13 @@ def regress_video(
 
 
 def load_dmd_target(
-    rootdir: str, expt_name: str, downsample_factor: float = 1
+    root_dir: Union[str, PathLike[Any]], expt_name: str, downsample_factor: float = 1
 ) -> npt.NDArray[np.bool_]:
     """Load the DMD target image from the experiment metadata.
     This is the image that the DMD is trying to project onto the screen.
 
     Args:
-        rootdir: root directory of the experiment.
+        root_dir: root directory of the experiment.
         expt_name: name of the experiment (single video).
         downsample_factor: factor by which to downsample the image. This deals with the fact that
             we downsample our images during processing.
@@ -72,14 +74,15 @@ def load_dmd_target(
         2D DMD target mask in image space.
     """
     # Load the .mat file containing the metadata.
-    expt_data = mat73.loadmat(os.path.join(rootdir, expt_name, "output_data_py.mat"))[
+    expt_data = mat73.loadmat(Path(root_dir, expt_name, "output_data_py.mat"))[
         "dd_compat_py"
     ]
     width = int(expt_data["camera"]["roi"][1])
     height = int(expt_data["camera"]["roi"][3])
     dmd_target = expt_data["dmd_lightcrafter"]["target_image_space"]
 
-    # DMD transformation to image space is not perfect, so we need to crop the image to get rid of the black border
+    # DMD transformation to image space is not perfect, so we need to crop the image to get rid of
+    # the black border
     offset_x = int((dmd_target.shape[1] - width) / 2)
     offset_y = int((dmd_target.shape[0] - height) / 2)
     dmd_target = dmd_target[offset_y:-offset_y, offset_x:-offset_x]
@@ -88,8 +91,11 @@ def load_dmd_target(
 
 
 def load_raw_data(
-    raw_dir: str, dims: Tuple[int, int], file_idx: int = 1, dtype_str: str = "<u2"
-):
+    raw_dir: Union[str, PathLike[Any]],
+    dims: Tuple[int, int],
+    file_idx: int = 1,
+    dtype_str: str = "<u2",
+) -> npt.NDArray:
     """Load raw data from a .bin file. Handles the fact that the file name can be different.
 
     Args:
@@ -103,18 +109,23 @@ def load_raw_data(
         FileNotFoundError: if the raw data file cannot be found.
     """
     rows, cols = dims
-    rawpath = os.path.join(raw_dir, "frames.bin")
-    if not os.path.exists(rawpath):
-        rawpath = os.path.join(raw_dir, f"frames{file_idx+1}.bin")
-    if not os.path.exists(rawpath):
-        rawpath = os.path.join(raw_dir, "Sq_camera.bin")
-    if not os.path.exists(rawpath):
-        raise FileNotFoundError(f"Could not find raw data file {rawpath}")
+    rawpath = Path(raw_dir, "frames.bin")
+    if not rawpath.exists():
+        rawpath = Path(raw_dir, f"frames{file_idx+1}.bin")
+    if not rawpath.exists():
+        rawpath = Path(raw_dir, "Sq_camera.bin")
+    if not rawpath.exists():
+        raise FileNotFoundError(f"Could not find raw data file {str(rawpath)}")
 
     return np.fromfile(rawpath, dtype=np.dtype(dtype_str)).reshape((-1, rows, cols))
 
 
-def load_image(rootdir: str, expt_name: str, subfolder: str = "", raw: bool = True):
+def load_image(
+    rootdir: Union[str, PathLike[Any]],
+    expt_name: str,
+    subfolder: str = "",
+    raw: bool = True,
+):
     """General image loading function that handles various file formats floating around in
     Cohen lab.
 
@@ -131,7 +142,7 @@ def load_image(rootdir: str, expt_name: str, subfolder: str = "", raw: bool = Tr
         Image data.  If there is only one camera, this will be a 3D array (time, x, y).  If there
             are multiple cameras, this will be a list of 3D arrays.
     """
-    data_dir = os.path.join(rootdir, subfolder)
+    data_dir = Path(rootdir, subfolder)
     # Load the .mat file containing the metadata
     expt_metadata = utils.load_experiment_metadata(rootdir, expt_name)
     imgs = []
@@ -141,20 +152,18 @@ def load_image(rootdir: str, expt_name: str, subfolder: str = "", raw: bool = Tr
             width = int(expt_metadata["cameras"][i]["roi"][1])
             height = int(expt_metadata["cameras"][i]["roi"][3])
             imgs.append(
-                load_raw_data(
-                    os.path.join(data_dir, expt_name), (height, width), file_idx=i
-                )
+                load_raw_data(data_dir / expt_name, (height, width), file_idx=i)
             )
 
     else:  # Identify the number of tif files.
         n_blocks = sum(
-            1 for f in os.listdir(data_dir) if (".tif" in f and expt_name in f)
+            1 for f in data_dir.iterdir() if (".tif" in str(f) and expt_name in str(f))
         )
         if n_blocks == 1:  # If there is only one tif file, load it.
-            imgs.append(skio.imread(os.path.join(data_dir, f"{expt_name}.tif")))
+            imgs.append(skio.imread(data_dir / f"{expt_name}.tif"))
         else:  # If there are multiple tif files, load them and concatenate them.
             img = [
-                skio.imread(os.path.join(data_dir, f"{expt_name}_block{block+1}.tif"))
+                skio.imread(data_dir / f"{expt_name}_block{block+1}.tif")
                 for block in range(n_blocks)
             ]
             imgs.append(np.concatenate(img, axis=0))
