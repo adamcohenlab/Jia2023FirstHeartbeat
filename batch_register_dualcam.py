@@ -38,26 +38,26 @@ for d in os.listdir(datadir):
         print(output_dir)
 
         # Load list of images
-        imgs, expt_data = images.load_image(datadir, expt_name)
+        imgs, expt_metadata = images.load_image(datadir, expt_name)
         print(imgs[0].shape, imgs[0].dtype)
         print(imgs[1].shape, imgs[0].dtype)
-        if len(expt_data["cameras"]) < 2:
+        if len(expt_metadata["cameras"]) < 2:
             continue
 
         # Get information about the ROI positions and sizes relative to the full frame
-        cam1_max_size = int(expt_data["cameras"][0]["max_size"])
-        cam1_offset = expt_data["cameras"][0]["roi"][[2,0]].astype(int)
+        cam1_max_size = int(expt_metadata["cameras"][0]["max_size"])
+        cam1_offset = expt_metadata["cameras"][0]["roi"][[2,0]].astype(int)
 
-        cam2_max_size = int(expt_data["cameras"][1]["max_size"])
-        cam2_offset = expt_data["cameras"][1]["roi"][[2,0]].astype(int)
+        cam2_max_size = int(expt_metadata["cameras"][1]["max_size"])
+        cam2_offset = expt_metadata["cameras"][1]["roi"][[2,0]].astype(int)
 
-        cam1_bounds = np.array([expt_data["cameras"][0]["roi"][[2,0]], \
-                    expt_data["cameras"][0]["roi"][[2,0]] + \
-                    expt_data["cameras"][0]["roi"][[3,1]] ])
+        cam1_bounds = np.array([expt_metadata["cameras"][0]["roi"][[2,0]], \
+                    expt_metadata["cameras"][0]["roi"][[2,0]] + \
+                    expt_metadata["cameras"][0]["roi"][[3,1]] ])
 
-        cam2_bounds = np.array([expt_data["cameras"][1]["roi"][[2,0]], \
-                    expt_data["cameras"][1]["roi"][[2,0]] + \
-                    expt_data["cameras"][1]["roi"][[3,1]] ])
+        cam2_bounds = np.array([expt_metadata["cameras"][1]["roi"][[2,0]], \
+                    expt_metadata["cameras"][1]["roi"][[2,0]] + \
+                    expt_metadata["cameras"][1]["roi"][[3,1]] ])
 
         cam2_bbox = bounds_to_bbox(cam2_bounds)
         cam1_bbox = bounds_to_bbox(cam1_bounds)
