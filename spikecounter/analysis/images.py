@@ -1648,17 +1648,19 @@ def get_heart_mask(
 
     if n_valid_components == 0:
         return np.zeros((img.shape[1], img.shape[2]), dtype=bool)
-    else:
-        comp_idx = np.argmax(krt)
-        comp = np.abs(pca.components_[comp_idx].reshape(img.shape[1], img.shape[2]))
-        rough_mask = comp > np.percentile(comp, 95)
-        test_trace = image_to_trace(img, mask=rough_mask)
-        corrs = np.apply_along_axis(
-            lambda x: stats.pearsonr(test_trace, x)[0], 0, datmatrix
-        )
-        corrs = corrs.reshape(img.shape[1], img.shape[2])
-        mask = corrs > corr_thresh
-        return mask
+
+    comp_idx = np.argmax(krt)
+    comp = np.abs(pca.components_[comp_idx].reshape(img.shape[1], img.shape[2]))
+    rough_mask = comp > np.percentile(comp, 95)
+    test_trace = image_to_trace(img, mask=rough_mask)
+    corrs = np.apply_along_axis(
+        lambda x: stats.pearsonr(test_trace, x)[0], 0, datmatrix
+    )
+    corrs = corrs.reshape(img.shape[1], img.shape[2])
+    mask = corrs > corr_thresh
+    mask = morphology.binary_opening(mask, selem=np.ones((3, 3)))
+    mask = morphology.binary_closing(mask, selem=np.ones((3, 3)))
+    return mask
 
 
 def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70):

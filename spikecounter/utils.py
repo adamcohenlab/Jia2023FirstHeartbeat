@@ -1,3 +1,5 @@
+from pathlib import Path
+import warnings
 import os
 from os import PathLike
 import numpy as np
@@ -66,51 +68,58 @@ def extract_experiment_name(input_path):
 
 
 def load_experiment_metadata(
-    rootdir: Union[str, PathLike],
+    root_dir: Union[str, PathLike],
     expt_name: str,
 ) -> Union[Dict[str, Any], None]:
     """Load and interpret metadata file from experiment folder
 
     Args:
-        rootdir (str): path to experiment folder
+        root_dir (str): path to experiment folder
         expt_name (str): name of experiment folder
 
     Returns:
         expt_data (Union[Dict[str, Any], None]): dictionary of experiment metadata
 
     """
-    if os.path.exists(os.path.join(rootdir, expt_name, "output_data_py.mat")):
+    metadata_path = Path(root_dir, expt_name, "output_data_py.mat")
+    if metadata_path.exists():
         try:
             expt_data = mat73.loadmat(
-                os.path.join(rootdir, expt_name, "output_data_py.mat")
+                os.path.join(root_dir, expt_name, "output_data_py.mat")
             )["dd_compat_py"]
-        except Exception as e:
-            print(e)
+        except FileNotFoundError as err:
+            warnings.warn(str(err))
             expt_data = None
-    elif os.path.exists(
-        os.path.join(rootdir, expt_name, "experimental_parameters.txt")
-    ):
+    else:
+        metadata_path = Path(root_dir, expt_name, "experimental_parameters.txt")
         try:
             expt_data = {"camera": {"roi": [0, 0, 0, 0]}}
-            with open(
-                os.path.join(rootdir, expt_name, "experimental_parameters.txt"), "r"
-            ) as f:
+            with metadata_path.open() as f:
                 expt_data["camera"]["roi"][1] = int(
                     re.search("\d+", f.readline()).group(0)
                 )
                 expt_data["camera"]["roi"][3] = int(
                     re.search("\d+", f.readline()).group(0)
                 )
-        except Exception as e:
-            print(e)
+        except FileNotFoundError as err:
+            warnings.warn(str(err))
             expt_data = None
-    else:
-        expt_data = None
     return expt_data
 
 
-def process_experiment_metadata(expt_metadata, regexp_dict={}, dtypes={}):
-    """Extract data from filenames in basic metadata DF"""
+def process_experiment_metadata(expt_metadata: pd.DataFrame,
+                                regexp_dict: Union[Dict,None] = None,
+                                dtypes: Union[Dict,None] = None):
+    """Extract data from filenames in basic metadata table.
+
+    Args:
+        expt_metadata: basic metadata table
+        regexp_dict: optional dictionary of regular expressions to extract data from filenames
+        dtypes: optional dictionary of data types for extracted data
+    Returns:
+        A metadata table with information parsed from filenames.
+
+    """
     new_df = expt_metadata.sort_values("start_time").reset_index()
     if "index" in new_df:
         del new_df["index"]
@@ -118,18 +127,18 @@ def process_experiment_metadata(expt_metadata, regexp_dict={}, dtypes={}):
     offsets = [s - start_times[0] for s in start_times]
     offsets = [o.seconds for o in offsets]
     new_df["offset"] = offsets
-    for key, value in regexp_dict.items():
-        res = [re.search(value, f) for f in list(new_df["file_name"])]
-        matches = []
-        for r in res:
-            if r:
-                matches.append(r.group(0))
-            else:
-                matches.append("None")
-        new_df[key] = matches
-        if key in dtypes:
-            new_df[key] = new_df[key].astype(dtypes[key])
-
+    if regexp_dict:
+        for key, value in regexp_dict.items():
+            parser_results = [re.search(value, f) for f in list(new_df["file_name"])]
+            matches = []
+            for res in parser_results:
+                if res:
+                    matches.append(res.group(0))
+                else:
+                    matches.append("None")
+            new_df[key] = matches
+            if dtypes and key in dtypes:
+                new_df[key] = new_df[key].astype(dtypes[key])
     return new_df
 
 
