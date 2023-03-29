@@ -51,7 +51,7 @@ for idx in expt_info.index.unique():
         file_name = curr_batch_info["file_name"].iloc[i]
         print(file_name)
         img = skio.imread(os.path.join(args.data_folder, "%s.tif" % file_name))
-        ri = images.get_bbox_images(img, roi_mask)
+        ri = images.extract_bbox_images(img, roi_mask)
         
         for j in range(len(ri)):
             embryo = j+1

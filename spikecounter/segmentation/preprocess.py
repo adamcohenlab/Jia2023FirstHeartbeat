@@ -110,7 +110,7 @@ def subtract_photobleach(img, n_to_sample=3, channels=[0], filter_size=3):
     return subtracted_img
 
 
-def get_region_data(data, mask, region):
+def extract_region_data(data, mask, region):
     global_coords = np.argwhere(mask==region)
     region_data = np.zeros((data.shape[0], global_coords.shape[0]))
     for px_idx in range(global_coords.shape[0]):
@@ -118,7 +118,7 @@ def get_region_data(data, mask, region):
         region_data[:,px_idx] = data[:,px[0],px[1]]
     return region_data, global_coords
 
-def generate_cropped_region_image(global_coords, intensity):
+def extract_cropped_region_image(global_coords, intensity):
     global_coords_rezeroed = global_coords - np.min(global_coords, axis=0)
     img = np.zeros(np.max(global_coords_rezeroed, axis=0)+1)
     for idx in range(len(intensity)):
@@ -146,7 +146,7 @@ def segment_hearts(img, expected_embryos, prev_coms=None, prev_mask_labels=None,
     xx = morph.binary_opening(cv_mask, selem= np.ones((5,5)))
     xxx = morph.binary_dilation(xx, selem= np.ones((15,15)))
     labelled = measure.label(xxx)
-    rd, gc = images.get_all_region_data(img, labelled)
+    rd, gc = images.extract_all_region_data(img, labelled)
     
     bp_counter = 0
     new_mask = np.zeros_like(mean_img, dtype=bool)

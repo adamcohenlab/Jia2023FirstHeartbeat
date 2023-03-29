@@ -1,7 +1,10 @@
+""" Functions for loading and processing images.
+
+"""
 from pathlib import Path
 from os import PathLike
 import os
-from typing import Tuple, Union, Callable, Any
+from typing import Tuple, Union, Callable, Any, List
 import pickle
 import warnings
 
@@ -120,6 +123,26 @@ def load_raw_data(
     return np.fromfile(rawpath, dtype=np.dtype(dtype_str)).reshape((-1, rows, cols))
 
 
+def load_tif_blocks(
+    tif_dir: Union[str, PathLike[Any]],
+    expt_name: str,
+) -> npt.NDArray:
+    """Load tif files in blocks to save memory.
+
+    Args:
+        tif_dir: directory containing the tif files.
+        expt_name: name of the experiment broken up into blocks.
+    Returns:
+        3D array of tif data (time, x, y).
+    """
+    tif_files = sorted(Path(tif_dir).glob(f"{expt_name}*.tif"))
+    blocks = []
+    for tif_file in tif_files:
+        blocks.append(skio.imread(tif_file))
+    img = np.concatenate(blocks, axis=0)
+    return img
+
+
 def load_image(
     rootdir: Union[str, PathLike[Any]],
     expt_name: str,
@@ -155,18 +178,10 @@ def load_image(
                 load_raw_data(data_dir / expt_name, (height, width), file_idx=i)
             )
 
-    else:  # Identify the number of tif files.
-        n_blocks = sum(
-            1 for f in data_dir.iterdir() if (".tif" in str(f) and expt_name in str(f))
-        )
-        if n_blocks == 1:  # If there is only one tif file, load it.
-            imgs.append(skio.imread(data_dir / f"{expt_name}.tif"))
-        else:  # If there are multiple tif files, load them and concatenate them.
-            img = [
-                skio.imread(data_dir / f"{expt_name}_block{block+1}.tif")
-                for block in range(n_blocks)
-            ]
-            imgs.append(np.concatenate(img, axis=0))
+    else:
+        # Identify the number of tif files (files for each experiment not necessarily in their own
+        # folder).
+        imgs.append(load_tif_blocks(data_dir, expt_name))
 
     if expt_metadata and "frame_counter" in expt_metadata.keys():
         # Check to make sure that the number of frames in the .bin file matches the number of frames
@@ -192,17 +207,20 @@ def load_image(
     return imgs, expt_metadata
 
 
-def load_confocal_image(path, direction="both", extra_offset=2):
+def load_confocal_image(
+    path: Union[str, PathLike], direction: str = "both", extra_offset: int = 2
+) -> npt.NDArray:
     """Load a confocal image from a .mat file, because it is stored as a DAQ output trace.
     If direction is "fwd", will return the forward scan only.
 
     Inputs:
         path: path to the .mat file
         direction: "fwd" or "both"
-        extra_offset: number of pixels to add to the shifting of reverse scan to align it with forward scan.
-            This is a hack to deal with the fact that the reverse scan is shifted by a few pixels relative to the forward scan.
+        extra_offset: number of pixels to add to the shifting of reverse scan to align it with
+            forward scan. This is a hack to deal with the fact that the reverse scan is shifted by a
+            few pixels relative to the forward scan.
     Returns:
-        img: confocal image (z-stack).
+        confocal image (z-stack).
     """
     # Load the .mat file containing the metadata and extract information about the scan.
     matdata = mat73.loadmat(path)["dd_compat_py"]
@@ -242,57 +260,51 @@ def load_confocal_image(path, direction="both", extra_offset=2):
         return mean_img
 
     else:
-        raise Exception("Not implemented")
+        raise ValueError(f"direction = {direction} not implemented")
 
 
-def generate_invalid_frame_indices(stim_trace):
-    """Identify frames that are invalid due to cross-talk from blue-light stimulation.
-
-    Inputs:
-        stim_trace: 1D array of blue light stimulation trace.
-    Returns:
-        invalid_indices_camera: 1D array of indices of invalid frames.
-    """
-
-    invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
-    invalid_indices_camera = np.concatenate(
-        (invalid_indices_daq, invalid_indices_daq + 1)
-    )
-    return invalid_indices_camera
-
-
-def get_all_region_data(img, mask):
+def extract_all_region_data(
+    img: npt.NDArray, mask: npt.NDArray[np.unsignedinteger]
+) -> Tuple[List[npt.NDArray], List[npt.NDArray]]:
     """Turn all mask regions into pixel-time traces of intensity
+
+    Calls `extract_region_data` for each region in the mask.
 
     Inputs:
         img: 3D array of raw image data (timepoints x pixels x pixels)
-        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different
+            region.
     Returns:
-        region_data: list of 2D arrays (timepoints x pixels) for each region.
+        region_data: list of 2D arrays (timepoints x pixels) describing intensities for each region.
+        region_coords: list of 2D arrays (pixels x 2) describing the pixel coordinates for each
+            region.
     """
-    region_pixels = []
-    region_pixels = []
+    region_coords = []
     regions = np.unique(mask)
     regions = regions[regions >= 1]
     region_data = []
 
     for region in regions:
-        rd, gc = get_region_data(img, mask, region)
-        region_pixels.append(gc)
+        rd, gc = extract_region_data(img, mask, region)
+        region_coords.append(gc)
         region_data.append(rd)
-    return region_data, region_pixels
+    return region_data, region_coords
 
 
-def get_region_data(img, mask, region_index):
+def extract_region_data(img: npt.NDArray, mask: npt.NDArray[np.unsignedinteger],
+                    region_index: int) -> Tuple[npt.NDArray, npt.NDArray]:
     """Turn raw image data from a specific region defined by integer-valued mask into a 2D matrix
     (timepoints x pixels)
 
     Inputs:
         img: 3D array of raw image data (timepoints x pixels x pixels)
-        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different
+            region.
         region_index: integer value of the region to extract.
     Returns:
         region_data: 2D array (timepoints x pixels) for the specified region.
+        global_coords: 2D array (pixels x 2) of the pixel coordinates for the specified region,
+            relative to the whole image.
 
     """
     global_coords = np.argwhere(mask == region_index)
@@ -304,14 +316,15 @@ def get_region_data(img, mask, region_index):
     return region_data, global_coords
 
 
-def generate_cropped_region_image(
+def extract_cropped_region_image(
     intensity: npt.NDArray, global_coords: Union[npt.NDArray, Tuple[int, int]]
 ) -> npt.NDArray:
     """Turn an unraveled list of intensities back into an image based on the
     bounding box of the specified global coordinates.
 
     Inputs:
-        intensity (npt.ArrayLike): 1D array of intensity values.
+        intensity (npt.ArrayLike): 1D array of intensity values or 2D array of intensity values over
+            time (timepoints x pixels).
         global_coords (npt.NDArray): defined shape of image or 2D array of
             explicit global coordinates (pixels x 2).
     Returns:
@@ -320,33 +333,34 @@ def generate_cropped_region_image(
     if isinstance(global_coords, tuple):
         img = intensity.reshape(global_coords)
     else:
+        if len(intensity.shape) > 2:
+            raise TypeError("Expected 1D or 2D array of intensities")
         global_coords_rezeroed = global_coords - np.min(global_coords, axis=0)
         if len(intensity.shape) == 1:
-            img = np.zeros(np.max(global_coords_rezeroed, axis=0) + 1)
-            for idx in range(intensity.shape[0]):
-                curr_px = global_coords_rezeroed[idx, :]
-                img[curr_px[0], curr_px[1]] = intensity[idx]
-        elif len(intensity.shape) == 2:
-            img = np.zeros(
-                [intensity.shape[0]] + list(np.max(global_coords_rezeroed, axis=0) + 1)
-            )
-            for idx in range(intensity.shape[1]):
-                curr_px = global_coords_rezeroed[idx, :]
-                img[:, curr_px[0], curr_px[1]] = intensity[:, idx]
-        else:
-            raise TypeError("Expected 1D or 2D array of intensities")
+            intensity = intensity[np.newaxis,:]
+
+        img = np.zeros(
+            [intensity.shape[0]] + list(np.max(global_coords_rezeroed, axis=0) + 1)
+        )
+        for idx in range(intensity.shape[1]):
+            curr_px = global_coords_rezeroed[idx, :]
+            img[:, curr_px[0], curr_px[1]] = intensity[:, idx]
+        img = np.squeeze(img)
     return img
 
 
-def get_bbox_images(img, mask, padding=0):
+def extract_bbox_images(img: npt.NDArray, mask: npt.NDArray[np.unsignedinteger],
+                    padding: int = 0) -> List[npt.NDArray]:
     """Get cropped images defined by the bounding boxes of ROIS provided by a mask
 
     Inputs:
         img: 3D array of raw image data (timepoints x pixels x pixels)
-        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+        mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different
+            region.
         padding: number of pixels to add to the bounding box on each side.
     Returns:
-        cropped_images: list of 3D arrays (timepoints x pixels x pixels) for the bounding box defined by each region.
+        cropped_images: list of 3D arrays (timepoints x pixels x pixels) for the bounding box
+            defined by each region.
     """
     bboxes = [p["bbox"] for p in measure.regionprops(mask)]
     cropped_images = []
@@ -370,13 +384,13 @@ def plot_pca_data(
     temporal trace (dot product).
 
     Inputs:
-        pca (sklearn.decomposition.PCA): sklearn.decomposition.PCA object
-        raw_data (npt.NDArray): 2D array of raw data (timepoints x pixels)
-        gc (Union[npt.NDArray, Tuple[int, int]]): 2D array of global coordinates
-            (pixels x 2) OR tuple of (rows, cols) for the shape of the image.
-        n_components (int): number of principal components to display.
-        pc_title (Union[Callable, None]): function to generate a title for
-            each principal component. If None, the default title is used.
+        pca: sklearn.decomposition.PCA object
+        raw_data: 2D array of raw data (timepoints x pixels)
+        gc: 2D array of global coordinates (pixels x 2) OR tuple of (rows, cols) for the shape of
+            the image.
+        n_components: number of principal components to display.
+        pc_title: function to generate a title for each principal component. If None, the default
+            title is used.
     Returns:
         None
     """
@@ -386,30 +400,14 @@ def plot_pca_data(
         )
     for i in range(n_components):
         _, axes = plt.subplots(1, 2, figsize=(12, 6))
-        axes = axes.ravel()
+        axes = np.array(axes).ravel()
         comp = pca.components_[i]
-        cropped_region_image = generate_cropped_region_image(comp, gc)
+        cropped_region_image = extract_cropped_region_image(comp, gc)
         dot_trace = np.matmul(raw_data, comp)
         axes[0].imshow(cropped_region_image)
         axes[0].set_title(pc_title(i, comp))
         axes[1].set_title("PC Value")
         axes[1].plot(dot_trace)
-
-
-def crosstalk_mask_to_stim_index(crosstalk_mask, pos="start"):
-    """Convert detected spikes from crosstalk into an index for spike-triggered averaging. Use either upward or downward edge.
-
-    Inputs:
-        crosstalk_mask: 1D array of boolean values indicating whether a spike was detected.
-    Returns:
-        stims: 1D array of indices corresponding to the start or end of each spike.
-    """
-    diff_mask = np.diff(crosstalk_mask.astype(int))
-    if pos == "start":
-        stims = np.argwhere(diff_mask == 1).ravel()
-    elif pos == "end":
-        stims = np.argwhere(diff_mask == -1).ravel() + 1
-    return stims
 
 
 def image_to_roi_traces(img, label_mask):
@@ -474,7 +472,7 @@ def plot_image_mean_and_stim(img, mask=None, style="line", duration=0, fs=1):
     """Plot mean of image (mask optional) and mark points where the image was stimulated"""
     trace = image_to_trace(img, mask)
     masked_trace, spike_mask = traces.remove_stim_crosstalk(trace)
-    stim_end = crosstalk_mask_to_stim_index(spike_mask)
+    stim_end = traces.crosstalk_mask_to_stim_index(spike_mask)
     fig1, ax1 = plt.subplots(figsize=(12, 6))
     ts = np.arange(img.shape[0]) / fs
     ax1.plot(ts, trace, color="C1")
@@ -1684,7 +1682,7 @@ def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70)
         return selected_components
 
     region_masks = []
-    region_data, region_pixels = get_all_region_data(img, rois)
+    region_data, region_pixels = extract_all_region_data(img, rois)
     for region_idx in range(len(region_data)):
         rd = region_data[region_idx]
         gc = region_pixels[region_idx]
