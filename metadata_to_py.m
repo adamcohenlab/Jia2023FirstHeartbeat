@@ -69,9 +69,12 @@ function devices = load_device_data(dd, options)
     
     devices = {};
     for i = 1:length(dd)
-       if isfield(dd{i}, "Device_Type") && ...
-           (isempty(device_type) || ~isempty(strfind(dd{i}.Device_Type,device_type))) && ...
-               (isempty(device_name) || dd{i}.Device_Name == device_name)
+       if isfield(dd{i}, "Device_Name") && ~isempty(device_name) ...
+               && dd{i}.Device_Name == device_name
+           devices = dd{i};
+           break
+       elseif isfield(dd{i}, "Device_Type") && ...
+           ~isempty(strfind(dd{i}.Device_Type,device_type))
            devices{end+1} = dd{i};
        end
     end
