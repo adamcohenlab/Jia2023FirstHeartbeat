@@ -1656,10 +1656,38 @@ def get_heart_mask(
     )
     corrs = corrs.reshape(img.shape[1], img.shape[2])
     mask = corrs > corr_thresh
-    mask = morphology.binary_opening(mask, selem=np.ones((3, 3)))
-    mask = morphology.binary_closing(mask, selem=np.ones((3, 3)))
+    mask = morphology.binary_opening(mask, footprint=np.ones((3, 3)))
+    mask = morphology.binary_closing(mask, footprint=np.ones((3, 3)))
+    mask = morphology.binary_dilation(mask, footprint=np.ones((3, 3)))
+
     return mask
 
+
+def remove_large_jumps(mask_video, direction="rev", n_ref=10):
+    if direction == "rev":
+        mask_video = np.flip(mask_video, axis=0)
+    
+    init_ref_mask = np.median(mask_video[:n_ref], axis=0).astype(bool)
+    
+    mask_jumps_removed = np.zeros_like(mask_video, dtype=bool)
+    timepoint_filled = np.zeros(mask_jumps_removed.shape[0], dtype=bool)
+    
+    for idx, mask in enumerate(mask_video):
+        if idx == 0:
+            prev_mask = init_ref_mask
+        else:
+            prev_mask = mask_jumps_removed[idx-1]
+        
+        if np.sum(mask & prev_mask) == 0:
+            mask_jumps_removed[idx] = prev_mask
+            timepoint_filled[idx] = True
+        else:
+            mask_jumps_removed[idx] = mask
+    
+    if direction == "rev":
+        mask_jumps_removed = np.flip(mask_jumps_removed, axis=0)
+    return mask_jumps_removed
+        
 
 def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70):
     """Refine manual segmentation to localize the heart using PCA assuming that transients are the largest fluctuations present.
