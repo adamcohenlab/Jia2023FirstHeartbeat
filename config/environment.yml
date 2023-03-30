@@ -270,6 +270,7 @@ dependencies:
       - click==8.1.3
       - frozendict==2.3.6
       - h5py==3.8.0
+      - imagesize==1.4.1
       - mat73==0.60
       - mypy-extensions==1.0.0
       - parse==1.19.0

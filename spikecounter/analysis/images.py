@@ -291,8 +291,9 @@ def extract_all_region_data(
     return region_data, region_coords
 
 
-def extract_region_data(img: npt.NDArray, mask: npt.NDArray[np.unsignedinteger],
-                    region_index: int) -> Tuple[npt.NDArray, npt.NDArray]:
+def extract_region_data(
+    img: npt.NDArray, mask: npt.NDArray[np.unsignedinteger], region_index: int
+) -> Tuple[npt.NDArray, npt.NDArray]:
     """Turn raw image data from a specific region defined by integer-valued mask into a 2D matrix
     (timepoints x pixels)
 
@@ -337,7 +338,7 @@ def extract_cropped_region_image(
             raise TypeError("Expected 1D or 2D array of intensities")
         global_coords_rezeroed = global_coords - np.min(global_coords, axis=0)
         if len(intensity.shape) == 1:
-            intensity = intensity[np.newaxis,:]
+            intensity = intensity[np.newaxis, :]
 
         img = np.zeros(
             [intensity.shape[0]] + list(np.max(global_coords_rezeroed, axis=0) + 1)
@@ -349,8 +350,9 @@ def extract_cropped_region_image(
     return img
 
 
-def extract_bbox_images(img: npt.NDArray, mask: npt.NDArray[np.unsignedinteger],
-                    padding: int = 0) -> List[npt.NDArray]:
+def extract_bbox_images(
+    img: npt.NDArray, mask: npt.NDArray[np.unsignedinteger], padding: int = 0
+) -> List[npt.NDArray]:
     """Get cropped images defined by the bounding boxes of ROIS provided by a mask
 
     Inputs:
@@ -395,9 +397,10 @@ def plot_pca_data(
         None
     """
     if pc_title is None:
-        pc_title = (
-            lambda j, k: f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
-        )
+
+        def pc_title(j, *args):
+            return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
+
     for i in range(n_components):
         _, axes = plt.subplots(1, 2, figsize=(12, 6))
         axes = np.array(axes).ravel()
@@ -410,22 +413,26 @@ def plot_pca_data(
         axes[1].plot(dot_trace)
 
 
-def image_to_roi_traces(img, label_mask):
-    """Get traces from image using defined ROI mask, where each ROI is defined by a unique integer value.
+def extract_roi_traces(
+    img: npt.NDArray, label_mask: npt.NDArray[np.unsignedinteger]
+) -> npt.NDArray:
+    """Get traces from image using defined ROI mask, where each ROI is defined by a unique integer
+    value.
 
     Inputs:
         img: 3D array of raw image data (timepoints x pixels x pixels)
-        label_mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different region.
+        label_mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a
+            different region.
     Returns:
         traces: 2D array of traces (ROIs x timepoints)
     """
     labels = np.unique(label_mask)
     labels = labels[labels != 0]
-    traces = [image_to_trace(img, label_mask == l) for l in labels]
-    return np.array(traces)
+    image_traces = [extract_mask_trace(img, label_mask == l) for l in labels]
+    return np.array(image_traces)
 
 
-def image_to_trace(img, mask=None):
+def extract_mask_trace(img, mask=None):
     """Average part of an image to a trace according to a binary mask.
 
     Inputs:
@@ -470,7 +477,7 @@ def interpolate_invalid_values(img, mask):
 
 def plot_image_mean_and_stim(img, mask=None, style="line", duration=0, fs=1):
     """Plot mean of image (mask optional) and mark points where the image was stimulated"""
-    trace = image_to_trace(img, mask)
+    trace = extract_mask_trace(img, mask)
     masked_trace, spike_mask = traces.remove_stim_crosstalk(trace)
     stim_end = traces.crosstalk_mask_to_stim_index(spike_mask)
     fig1, ax1 = plt.subplots(figsize=(12, 6))
@@ -960,7 +967,7 @@ def correct_photobleach(
             raw_img = 2 * mean_img - img
         else:
             raw_img = img
-        mean_trace = image_to_trace(raw_img, mask)
+        mean_trace = extract_mask_trace(raw_img, mask)
         _, pbleach = traces.correct_photobleach(
             mean_trace, method=method, nsamps=nsamps
         )
@@ -970,7 +977,7 @@ def correct_photobleach(
         # print(corrected_img.shape)
 
     elif method == "monoexp":
-        mean_trace = image_to_trace(img, mask)
+        mean_trace = extract_mask_trace(img, mask)
         background_level = np.percentile(img, 5, axis=0)
         _, pbleach, params = traces.correct_photobleach(
             mean_trace,
@@ -1008,7 +1015,7 @@ def correct_photobleach(
         if return_params:
             return corrected_img, amplitude, params
     elif method == "biexp":
-        mean_trace = image_to_trace(img, mask)
+        mean_trace = extract_mask_trace(img, mask)
         background_level = np.percentile(img, 5)
 
         _, pbleach, params = traces.correct_photobleach(
@@ -1293,7 +1300,7 @@ def image_to_peaks(
 
     sos = signal.butter(5, f_c, btype="lowpass", output="sos", fs=fs)
 
-    mask_trace = image_to_trace(img, mask=np.tile(mask, (img.shape[0], 1, 1)))
+    mask_trace = extract_mask_trace(img, mask=np.tile(mask, (img.shape[0], 1, 1)))
     mask_trace = signal.sosfiltfilt(sos, mask_trace)
     ps = np.percentile(mask_trace, [10, prom_pct])
     prominence = ps[1] - ps[0]
@@ -1346,7 +1353,7 @@ def image_to_sta(
         )
     _ = visualize.display_roi_overlay(mean_img, mask.astype(int), ax=axes[0])
 
-    raw_trace = image_to_trace(raw_img, np.tile(mask, (raw_img.shape[0], 1, 1)))
+    raw_trace = extract_mask_trace(raw_img, np.tile(mask, (raw_img.shape[0], 1, 1)))
 
     # convert to DF/F
 
@@ -1367,7 +1374,7 @@ def image_to_sta(
             exposure.rescale_intensity(dFF_img, out_range=(0, 255)).astype(np.uint8),
         )
 
-    dFF_mean = image_to_trace(dFF_img, mask=np.tile(mask, (dFF_img.shape[0], 1, 1)))
+    dFF_mean = extract_mask_trace(dFF_img, mask=np.tile(mask, (dFF_img.shape[0], 1, 1)))
     axes[1].plot(np.arange(dFF_img.shape[0]) / fs, dFF_mean, color="C2")
 
     if plot:
@@ -1510,7 +1517,7 @@ def identify_hearts(
             #         print(r1,r2,c1,c2)
             roi_mask = np.zeros_like(initial_guesses, dtype=bool)
             roi_mask[r1:r2, c1:c2] = 1
-            initial_trace = image_to_trace(zeroed_image, mask=roi_mask)
+            initial_trace = extract_mask_trace(zeroed_image, mask=roi_mask)
             roi_traces = zeroed_image[:, roi_mask]
             #         print(roi_traces.shape)
             corrs = np.apply_along_axis(
@@ -1650,7 +1657,7 @@ def get_heart_mask(
     comp_idx = np.argmax(krt)
     comp = np.abs(pca.components_[comp_idx].reshape(img.shape[1], img.shape[2]))
     rough_mask = comp > np.percentile(comp, 95)
-    test_trace = image_to_trace(img, mask=rough_mask)
+    test_trace = extract_mask_trace(img, mask=rough_mask)
     corrs = np.apply_along_axis(
         lambda x: stats.pearsonr(test_trace, x)[0], 0, datmatrix
     )
@@ -1666,28 +1673,28 @@ def get_heart_mask(
 def remove_large_jumps(mask_video, direction="rev", n_ref=10):
     if direction == "rev":
         mask_video = np.flip(mask_video, axis=0)
-    
+
     init_ref_mask = np.median(mask_video[:n_ref], axis=0).astype(bool)
-    
+
     mask_jumps_removed = np.zeros_like(mask_video, dtype=bool)
     timepoint_filled = np.zeros(mask_jumps_removed.shape[0], dtype=bool)
-    
+
     for idx, mask in enumerate(mask_video):
         if idx == 0:
             prev_mask = init_ref_mask
         else:
-            prev_mask = mask_jumps_removed[idx-1]
-        
+            prev_mask = mask_jumps_removed[idx - 1]
+
         if np.sum(mask & prev_mask) == 0:
             mask_jumps_removed[idx] = prev_mask
             timepoint_filled[idx] = True
         else:
             mask_jumps_removed[idx] = mask
-    
+
     if direction == "rev":
         mask_jumps_removed = np.flip(mask_jumps_removed, axis=0)
     return mask_jumps_removed
-        
+
 
 def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70):
     """Refine manual segmentation to localize the heart using PCA assuming that transients are the largest fluctuations present.
