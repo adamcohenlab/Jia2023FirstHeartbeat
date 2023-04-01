@@ -35,7 +35,7 @@ else:
     sta_bounds = (int(np.ceil(args.sta_before_s/dt)),int(np.ceil(args.sta_after_s/dt)))
 
 os.makedirs(os.path.join(rootdir, "analysis", subfolder, exptname), exist_ok=True)
-if args.stim_channel is not None:
+if args.stim_channel != "None":
     stims = dt_dict[args.stim_channel]
     stim_indices = np.argwhere(np.diff(stims)==1).ravel()
     if len(stim_indices) > 0:

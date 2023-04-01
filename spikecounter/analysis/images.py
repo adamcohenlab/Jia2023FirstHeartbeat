@@ -170,14 +170,13 @@ def load_image(
     expt_metadata = utils.load_experiment_metadata(rootdir, expt_name)
     imgs = []
 
-    if raw and expt_metadata:  # Load binary images for each camera
+    if raw and expt_metadata and (data_dir / expt_name).is_dir():  # Load binary images for each camera
         for i in range(len(expt_metadata["cameras"])):
             width = int(expt_metadata["cameras"][i]["roi"][1])
             height = int(expt_metadata["cameras"][i]["roi"][3])
             imgs.append(
                 load_raw_data(data_dir / expt_name, (height, width), file_idx=i)
             )
-
     else:
         # Identify the number of tif files (files for each experiment not necessarily in their own
         # folder).

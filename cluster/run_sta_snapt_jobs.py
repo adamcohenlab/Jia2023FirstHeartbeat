@@ -1,9 +1,11 @@
-import argparse
-import skimage.io as skio
+from pathlib import Path
 import os
-import pandas as pd
+import argparse
 import subprocess
 import time
+
+import skimage.io as skio
+import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootdir", help="Root directory")
@@ -18,10 +20,10 @@ parser.add_argument("--stim_channel", type=str, default="None")
 
 args = parser.parse_args()
     
-expt_info = pd.read_csv(os.path.join(args.rootdir,"analysis", args.subfolder, "experiment_data.csv")).sort_values("start_time")
+expt_info = pd.read_csv(Path(args.rootdir,"analysis", args.subfolder, "experiment_data.csv")).sort_values("start_time")
 
 for f in expt_info["file_name"]:
-    sh_line = ["sbatch", "/n/holyscratch01/cohen_lab/bjia/SpikeCounter/cluster/sta_snapt.sh", args.rootdir, f, \
+    sh_line = ["sbatch", os.path.join(os.getenv("SPIKECOUNTER_PATH"), "cluster/sta_snapt.sh"), args.rootdir, f, \
                 args.subfolder, args.s, args.n_knots, \
                args.sta_before_s, args.sta_after_s, args.normalize_height, args.bootstrap_n, args.stim_channel]
     print(sh_line)
