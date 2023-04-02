@@ -56,5 +56,5 @@ for idx in expt_info.index.unique():
             n_embryos = rp.shape[0]
         elif n_embryos != rp.shape[0]:
             logging.warning("Mismatch in number of embryos at file %s" % file_name)
-    segmentation_mask = np.array(segmentation_mask, dtype=int)
+    segmentation_mask = np.array(segmentation_mask, dtype=np.int32)
     skio.imsave(os.path.join(output_root, idx_string, "segmentation_mask.tif"), segmentation_mask)

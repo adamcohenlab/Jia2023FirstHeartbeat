@@ -134,7 +134,7 @@ else:
             for i in range(args.rpad+1):
                 invalid_mask[invalid_indices+i] = True
         
-        stim_frames_removed = images.interpolate_invalid_values(downsampled, invalid_mask)
+        stim_frames_removed = utils.interpolate_invalid_values(downsampled, invalid_mask)
         mean_img = stim_frames_removed.mean(axis=0)
         if args.decorrelate > 0:
             print("decorrelate")

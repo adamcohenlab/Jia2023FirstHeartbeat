@@ -1,9 +1,16 @@
+"""
+Utility functions for spikecounter package
+
+"""
 from pathlib import Path
 import warnings
+import importlib
 import os
 from os import PathLike
-import numpy as np
 from typing import Union, List, Tuple, Dict, Any
+
+import numpy as np
+from numpy import typing as npt
 from skimage import transform
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -34,14 +41,53 @@ def pad_func_unpad(arr, func, pad_width, **pad_params):
     return unpadded
 
 
-def make_iterable(x):
-    if type(x) is str:
+def make_iterable(x) -> Any:
+    if isinstance(x, str):
         yield x
     else:
         try:
             yield from x
         except TypeError:
             yield x
+
+
+def reload_libraries(libraries):
+    """Reload libraries from a list of strings
+    Args:
+        libraries (list): list of strings of libraries to reload
+    Returns:
+        None
+    """
+    for lib in make_iterable(libraries):
+        importlib.reload(lib)
+
+def interpolate_invalid_values(
+    arr: npt.NDArray, mask: npt.NDArray[np.bool_], kind: str = "previous"
+):
+    """Interpolate invalid values along the first axis of an N-D array
+
+    Inputs:
+        arr: array to be interpolated
+        mask: 1D array of mask data (pixels x pixels). True values indicate invalid values.
+    Returns:
+        Array with invalid values interpolated.
+    """
+    trace_length = arr.shape[0]
+    xs = np.arange(trace_length, dtype=int)[mask]
+    invalid_filled = np.copy(arr)
+    if kind == "previous":
+        invalid_filled[xs] = arr[
+            closest_non_zero(~mask, direction="left").squeeze()[xs]
+        ]
+    elif kind == "linear":
+        closest_left = closest_non_zero(~mask, direction="left").squeeze()[xs]
+        closest_right = closest_non_zero(~mask, direction="right").squeeze()[xs]
+        weight = (xs - closest_left) / (closest_right - closest_left)
+        invalid_filled[xs] = (
+            arr[closest_left] * (1 - weight)[:, None, None]
+            + arr[closest_right] * weight[:, None, None]
+        )
+    return invalid_filled
 
 
 def shiftkern(kernel, a, b, c, dt):
@@ -107,9 +153,11 @@ def load_experiment_metadata(
     return expt_data
 
 
-def process_experiment_metadata(expt_metadata: pd.DataFrame,
-                                regexp_dict: Union[Dict,None] = None,
-                                dtypes: Union[Dict,None] = None):
+def process_experiment_metadata(
+    expt_metadata: pd.DataFrame,
+    regexp_dict: Union[Dict, None] = None,
+    dtypes: Union[Dict, None] = None,
+):
     """Extract data from filenames in basic metadata table.
 
     Args:
@@ -502,15 +550,31 @@ def div(x):
     return divergence
 
 
-def closest_non_zero(arr):
-    nonzeros = np.argwhere(arr != 0)
-    #     print(nonzeros)
-    #     print(nonzeros.shape)
-    distances = np.abs(
-        np.subtract.outer(np.arange(len(arr), dtype=int), nonzeros)
-    ).reshape((len(arr), -1))
-    #     print(distances.shape)
-    min_indices = np.argmin(distances, axis=1)
+def closest_non_zero(arr: npt.NDArray, direction="both"):
+    """Find the index of the closest non-zero element in an array, in a given direction."""
+    arr = np.squeeze(arr)
+    if arr.ndim > 1:
+        raise ValueError("Array must be 1D")
+    if arr.dtype == bool:
+        nonzeros = np.argwhere(arr).ravel()
+    else:
+        nonzeros = np.argwhere(arr != 0).ravel()
+    diffs = np.subtract.outer(np.arange(len(arr), dtype=int), nonzeros).reshape(
+        (len(arr), -1)
+    )
+
+    if direction == "both":
+        distances = np.abs(diffs)
+    elif direction == "left":
+        distances = diffs
+        distances = np.ma.masked_array(distances, distances < 0)
+    elif direction == "right":
+        distances = -diffs
+        distances = np.ma.masked_array(distances, distances < 0)
+    else:
+        distances = np.zeros_like(diffs)
+
+    min_indices = distances.argmin(axis=1)
     return nonzeros[min_indices]
 
 

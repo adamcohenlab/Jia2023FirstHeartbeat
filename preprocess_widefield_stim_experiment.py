@@ -151,7 +151,7 @@ ax2 = ax1.twinx()
 ax2.plot(ts, pb_corrected_trace, color="C1")
 ax1.plot(ts[t_mask], trace[t_mask], "rx")
 
-stim_frames_removed = images.interpolate_invalid_values(downsampled, t_mask)
+stim_frames_removed = utils.interpolate_invalid_values(downsampled, t_mask)
 stim_removed_trace = images.extract_mask_trace(stim_frames_removed)
 ax1.plot(ts, stim_removed_trace - np.nanmean(stim_removed_trace) / 2, color="C2")
 mean_img = stim_frames_removed.mean(axis=0)

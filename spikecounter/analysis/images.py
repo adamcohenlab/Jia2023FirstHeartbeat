@@ -431,7 +431,7 @@ def extract_roi_traces(
     return np.array(image_traces)
 
 
-def extract_mask_trace(img, mask=None):
+def extract_mask_trace(img: npt.NDArray, mask: Union[npt.NDArray[np.bool_], None]=None):
     """Average part of an image to a trace according to a binary mask.
 
     Inputs:
@@ -446,32 +446,10 @@ def extract_mask_trace(img, mask=None):
         masked_img = np.ma.masked_array(img, mask=~mask)
         trace = masked_img.mean(axis=(1, 2))
     else:
+        # img is 2D, mask is 1D
         pixel_traces = img[:, mask]
         trace = pixel_traces.mean(axis=1)
     return trace
-
-
-def interpolate_invalid_values(img, mask):
-    """Interpolate invalid values pixelwise. Invalid values are defined by a mask of True values.
-
-    Inputs:
-        img: 3D array of raw image data (timepoints x pixels x pixels)
-        mask: 2D array of mask data (pixels x pixels). True values indicate invalid values.
-    Returns:
-        invalid_filled: 3D array of raw image data with invalid values interpolated.
-    """
-    xs = np.arange(img.shape[0])[~mask]
-    invalid_filled = np.copy(img)
-    for i in range(img.shape[1]):
-        for j in range(img.shape[2]):
-            ys = img[:, i, j][~mask]
-            interp_f = interpolate.interp1d(
-                xs, ys, kind="previous", fill_value="extrapolate"
-            )
-            missing_xs = np.argwhere(mask).ravel()
-            missing_ys = interp_f(missing_xs)
-            invalid_filled[mask, i, j] = missing_ys
-    return invalid_filled
 
 
 def plot_image_mean_and_stim(img, mask=None, style="line", duration=0, fs=1):
@@ -494,7 +472,6 @@ def plot_image_mean_and_stim(img, mask=None, style="line", duration=0, fs=1):
 
 def background_subtract(img, dark_level=100):
     return img - dark_level
-
 
 def get_spike_kernel(img, kernel_length, nbefore, peak_prominence, savgol_length=51):
     """Estimate a temporal spike kernel by doing naive peak detection and selecting a temporal window. Pick a subsample with the largest peak amplitudes after smoothing (presumably largest SNR) and average.
@@ -1618,10 +1595,14 @@ def get_heart_mask(
     n_components: int = 10,
     krt_thresh: float = 40,
     corr_thresh: float = 0.8,
-    plot=False,
+    min_size=40,
+    max_size=150,
+    plot: bool = False,
 ):
     """Extract a binary mask identifying a heart from an image of a
     single embryo.
+
+    Extraction based on high kurtosis principal components and size of segmented regions.
 
     Args:
         img: A 3D array of shape (n_frames, n_rows, n_cols) containing a video
@@ -1631,32 +1612,55 @@ def get_heart_mask(
             corresponding to heart dynamics.
         corr_thresh: Correlation threshold for identifying pixels corresponding
             to the principal components.
+        min_size: Minimum size of the initial segmentation.
+        max_size: Maximum size of the initial segmentation.
         plot: If True, plot the results of the segmentation.
     Returns:
         A 2D boolean array of shape (n_rows, n_cols) containing the mask.
     """
+    # Compute the principal components
     pca = PCA(n_components=n_components)
     datmatrix = np.copy(img).reshape(img.shape[0], -1)
     datmatrix -= np.mean(datmatrix, axis=0)
     pca.fit(datmatrix)
+    # Calculate filtering criteria: kurtosis and size of contiguous regions
     krt = stats.kurtosis(pca.components_, axis=1)
+    valid_size = np.zeros(krt.shape, dtype=bool)
+    valid_krt = krt > krt_thresh
+    rough_masks = np.zeros((n_components, img.shape[1], img.shape[2]), dtype=bool)
+
+    for i, comp in enumerate(pca.components_):
+        # Filter outlier regions based on size
+        pc_img = np.abs(comp.reshape(img.shape[1], img.shape[2]))
+        mask = pc_img > 4*np.std(pc_img)
+        mask = morphology.binary_opening(mask, footprint=np.ones((3, 3)))
+        mask = morphology.binary_closing(mask, footprint=np.ones((3, 3)))
+        labels = measure.label(mask)
+        areas = np.bincount(labels.ravel())
+        max_area_loc = np.argmax(areas[1:])+1
+        max_area = areas[max_area_loc]
+        valid_size[i] = (max_area > min_size) & (max_area < max_size)
+        rough_masks[i] = labels == max_area_loc
+
+    valid_components = valid_krt & valid_size
+
     if plot:
         plot_pca_data(
             pca,
             datmatrix,
             img.shape[1:],
             n_components=n_components,
-            pc_title=lambda i, comp: f"kurtosis: {krt[i]:.2f}",
+            pc_title=lambda i, comp: f"kurtosis: {krt[i]:.2f}, accepted: {valid_components[i]}",
         )
-    n_valid_components = np.sum(krt > krt_thresh)
 
+    n_valid_components = np.sum(valid_components)
     if n_valid_components == 0:
         return np.zeros((img.shape[1], img.shape[2]), dtype=bool)
 
-    comp_idx = np.argmax(krt)
-    comp = np.abs(pca.components_[comp_idx].reshape(img.shape[1], img.shape[2]))
-    rough_mask = comp > np.percentile(comp, 95)
+    comp_idx = np.argmax(krt[valid_components])
+    rough_mask = rough_masks[valid_components][comp_idx]
     test_trace = extract_mask_trace(img, mask=rough_mask)
+    # Pixel-wise correlation with the selected principal component
     corrs = np.apply_along_axis(
         lambda x: stats.pearsonr(test_trace, x)[0], 0, datmatrix
     )
