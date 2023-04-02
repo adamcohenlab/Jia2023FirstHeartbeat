@@ -1637,6 +1637,9 @@ def get_heart_mask(
         mask = morphology.binary_closing(mask, footprint=np.ones((3, 3)))
         labels = measure.label(mask)
         areas = np.bincount(labels.ravel())
+        if len(areas) < 2:
+            valid_size[i] = False
+            continue
         max_area_loc = np.argmax(areas[1:])+1
         max_area = areas[max_area_loc]
         valid_size[i] = (max_area > min_size) & (max_area < max_size)
@@ -1654,11 +1657,13 @@ def get_heart_mask(
         )
 
     n_valid_components = np.sum(valid_components)
+    print(n_valid_components, end= ", ")
     if n_valid_components == 0:
         return np.zeros((img.shape[1], img.shape[2]), dtype=bool)
 
     comp_idx = np.argmax(krt[valid_components])
     rough_mask = rough_masks[valid_components][comp_idx]
+
     test_trace = extract_mask_trace(img, mask=rough_mask)
     # Pixel-wise correlation with the selected principal component
     corrs = np.apply_along_axis(
