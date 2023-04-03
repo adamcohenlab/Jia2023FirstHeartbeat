@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../Jia2023AnalysisNotebooks"
+		},
+		{
+			"path": "../../Testbench"
 		}
 	],
 	"settings": {

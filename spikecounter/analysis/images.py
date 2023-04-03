@@ -15,6 +15,7 @@ from scipy import signal, stats, interpolate, optimize, ndimage
 from scipy.fft import fft, fftfreq
 
 import matplotlib.pyplot as plt
+from matplotlib import axes
 
 import skimage.io as skio
 from skimage import (
@@ -170,7 +171,9 @@ def load_image(
     expt_metadata = utils.load_experiment_metadata(rootdir, expt_name)
     imgs = []
 
-    if raw and expt_metadata and (data_dir / expt_name).is_dir():  # Load binary images for each camera
+    if (
+        raw and expt_metadata and (data_dir / expt_name).is_dir()
+    ):  # Load binary images for each camera
         for i in range(len(expt_metadata["cameras"])):
             width = int(expt_metadata["cameras"][i]["roi"][1])
             height = int(expt_metadata["cameras"][i]["roi"][3])
@@ -212,7 +215,7 @@ def load_confocal_image(
     """Load a confocal image from a .mat file, because it is stored as a DAQ output trace.
     If direction is "fwd", will return the forward scan only.
 
-    Inputs:
+    Args:
         path: path to the .mat file
         direction: "fwd" or "both"
         extra_offset: number of pixels to add to the shifting of reverse scan to align it with
@@ -269,7 +272,7 @@ def extract_all_region_data(
 
     Calls `extract_region_data` for each region in the mask.
 
-    Inputs:
+    Args:
         img: 3D array of raw image data (timepoints x pixels x pixels)
         mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different
             region.
@@ -296,7 +299,7 @@ def extract_region_data(
     """Turn raw image data from a specific region defined by integer-valued mask into a 2D matrix
     (timepoints x pixels)
 
-    Inputs:
+    Args:
         img: 3D array of raw image data (timepoints x pixels x pixels)
         mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different
             region.
@@ -322,7 +325,7 @@ def extract_cropped_region_image(
     """Turn an unraveled list of intensities back into an image based on the
     bounding box of the specified global coordinates.
 
-    Inputs:
+    Args:
         intensity (npt.ArrayLike): 1D array of intensity values or 2D array of intensity values over
             time (timepoints x pixels).
         global_coords (npt.NDArray): defined shape of image or 2D array of
@@ -354,7 +357,7 @@ def extract_bbox_images(
 ) -> List[npt.NDArray]:
     """Get cropped images defined by the bounding boxes of ROIS provided by a mask
 
-    Inputs:
+    Args:
         img: 3D array of raw image data (timepoints x pixels x pixels)
         mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a different
             region.
@@ -384,7 +387,7 @@ def plot_pca_data(
     """Show spatial principal components of a video and the corresponding
     temporal trace (dot product).
 
-    Inputs:
+    Args:
         pca: sklearn.decomposition.PCA object
         raw_data: 2D array of raw data (timepoints x pixels)
         gc: 2D array of global coordinates (pixels x 2) OR tuple of (rows, cols) for the shape of
@@ -418,7 +421,7 @@ def extract_roi_traces(
     """Get traces from image using defined ROI mask, where each ROI is defined by a unique integer
     value.
 
-    Inputs:
+    Args:
         img: 3D array of raw image data (timepoints x pixels x pixels)
         label_mask: 2D array of mask data (pixels x pixels). Each integer value corresponds to a
             different region.
@@ -431,10 +434,12 @@ def extract_roi_traces(
     return np.array(image_traces)
 
 
-def extract_mask_trace(img: npt.NDArray, mask: Union[npt.NDArray[np.bool_], None]=None):
+def extract_mask_trace(
+    img: npt.NDArray, mask: Union[npt.NDArray[np.bool_], None] = None
+) -> npt.NDArray:
     """Average part of an image to a trace according to a binary mask.
 
-    Inputs:
+    Args:
         img: 3D array of raw image data (timepoints x pixels x pixels)
         mask: 2D array of mask data (pixels x pixels). If None, average over entire image.
     Returns:
@@ -452,29 +457,23 @@ def extract_mask_trace(img: npt.NDArray, mask: Union[npt.NDArray[np.bool_], None
     return trace
 
 
-def plot_image_mean_and_stim(img, mask=None, style="line", duration=0, fs=1):
-    """Plot mean of image (mask optional) and mark points where the image was stimulated"""
-    trace = extract_mask_trace(img, mask)
-    masked_trace, spike_mask = traces.remove_stim_crosstalk(trace)
-    stim_end = traces.crosstalk_mask_to_stim_index(spike_mask)
-    fig1, ax1 = plt.subplots(figsize=(12, 6))
-    ts = np.arange(img.shape[0]) / fs
-    ax1.plot(ts, trace, color="C1")
-    bot, top = ax1.get_ylim()
-    if style == "line":
-        ax1.vlines(stim_end / fs, ymin=bot, ymax=top)
-    elif style == "rect":
-        raise ValueError("Rectangle stimulation to be implemented")
-    else:
-        raise ValueError("Style should be line or rect")
-    return fig1, ax1
+def background_subtract(img: npt.NDArray, dark_level: int = 100) -> npt.NDArray:
+    """Syntactic sugar for background subtraction.
 
-
-def background_subtract(img, dark_level=100):
+    Args:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        dark_level: value to subtract from each pixel
+    Returns:
+        img: 3D array of background subtracted image data (timepoints x pixels x pixels)
+    """
     return img - dark_level
 
+
 def get_spike_kernel(img, kernel_length, nbefore, peak_prominence, savgol_length=51):
-    """Estimate a temporal spike kernel by doing naive peak detection and selecting a temporal window. Pick a subsample with the largest peak amplitudes after smoothing (presumably largest SNR) and average.
+    """Estimate a temporal spike kernel by doing naive peak detection and selecting a temporal window.
+    Pick a subsample with the largest peak amplitudes after smoothing (presumably largest SNR) and average.
+
+    POSSIBLY UNUSED.
 
     Returns:
         kernel - temporal kernel for the spike
@@ -519,7 +518,9 @@ def get_spike_kernel(img, kernel_length, nbefore, peak_prominence, savgol_length
 
 
 def snapt(img, kernel, offset_width=0):
-    """Run SNAPT fitting algorithm (Hochbaum et al. Nature Methods 2014)"""
+    """Run SNAPT fitting algorithm (Hochbaum et al. Nature Methods 2014)
+    POSSIBLY UNUSED
+    """
     height = img.shape[1]
     width = img.shape[2]
     beta = np.zeros((height, width, 4))
@@ -544,25 +545,15 @@ def snapt(img, kernel, offset_width=0):
         "%d/%d pixels failed to fit (%.2f %%)"
         % (failed_counter, height * width, failed_counter / (height * width) * 100)
     )
-
-    #     for i in range(height):
-    #         for j in range(width):
-    #             try:
-    #                 popt, pcov = optimize.curve_fit(utils.shiftkern, kernel, img[:,i,j], p0=[1,1,1,np.random.randint(-offset_width,offset_width+1)], absolute_sigma=True, \
-    #                                                 bounds=([0,-np.inf,0,minshift],[np.inf,np.inf,np.inf,maxshift]))
-    #                 beta[i,j,:] = popt
-    #                 error_det[i,j] = np.linalg.det(pcov)
-    #             except Exception as e:
-    #                 print("(%d, %d) %s" % (i,j, str(e)))
-    #                 beta[i,j,:] = np.nan*np.ones(4)
-    #                 error_det[i,j] = np.nan
-    #                 failed_counter += 1
-    #     print("%d/%d pixels failed to fit (%.2f %%)" % (failed_counter, height*width, failed_counter/(height*width)*100))
     return beta, error_det
 
 
 def kernel_fit_single_trace(trace, kernel, minshift, maxshift, offset_width):
-    """Nonlinear fit of empirical kernel to a single timeseries"""
+    """Nonlinear fit of empirical kernel to a single timeseries
+
+    POSSIBLY UNUSED.
+
+    """
     try:
         popt, pcov = optimize.curve_fit(
             utils.shiftkern,
@@ -582,131 +573,125 @@ def kernel_fit_single_trace(trace, kernel, minshift, maxshift, offset_width):
 
 
 def spline_fit_single_trace(
-    trace, s, knots, plot=False, n_iterations=100, eps=0.01, ax1=None
-):
-    """Least squares spline fitting of a single timeseries"""
+    trace: npt.ArrayLike,
+    s: float,
+    knots: int,
+    plot: bool = False,
+    n_iterations: int = 100,
+    eps: float = 0.01,
+    ax1: Union[axes.Axes, None] = None,
+) -> Union[
+    Tuple[npt.NDArray, interpolate.BSpline],
+    Tuple[npt.NDArray, interpolate.BSpline, axes.Axes],
+]:
+    """Least squares spline fitting of a single timeseries
+
+    Args:
+        trace: 1D array of timeseries
+        s: smoothing parameter
+        knots: number of knots to use for spline representation
+        plot: whether to plot the fit
+        n_iterations: number of iterations to run the fitting algorithm
+        eps: convergence criterion for the fitting algorithm
+        ax1: matplotlib axes to plot the fit on
+    Returns:
+        beta: spline features (absolute height, half-maximum time,relative amplitude, residual,
+            time of maximum dx/dt)
+        spl: spline representation of the trace
+        (Optional) ax1: matplotlib axes with the plot
+    """
+    trace = np.array(trace)
     x = np.arange(len(trace))
-    trace[np.isnan(trace)] = np.min(trace)
-    (t, c, k), res, _, _ = interpolate.splrep(
+    trace[np.isnan(trace)] = np.nanmin(trace)
+
+    # Generate spline representation of the trace
+    param_tck, res, _, _ = interpolate.splrep(
         x, trace, s=s, task=-1, t=knots, full_output=True, k=3
     )
-    spl = interpolate.BSpline(t, c, k)
+    spl = interpolate.BSpline(*param_tck)
     spl_values = spl(x)
-    if plot:
-        if ax1 is None:
-            fig1, ax1 = plt.subplots(figsize=(12, 4))
-        ax1.plot(trace)
-        ax1.plot(spl(x))
-
     dspl = spl.derivative()
     d2spl = spl.derivative(nu=2)
 
-    def custom_newton_lsq(x, y, bounds=(-np.inf, np.inf)):
-        """solve for spline being a particular value, i.e. (spl(x) - y)**2 = 0"""
-        fx = spl(x) ** 2 - 2 * y * spl(x) + y**2
-        dfx = 2 * dspl(x) * spl(x) - 2 * y * dspl(x)
-        x1 = x - fx / dfx
-        x1 = max(bounds[0], x1)
-        x1 = min(bounds[1], x1)
-        return x1
-
-    #     naive_max = np.argmax(spl_values)
-    #     naive_min = np.argmin(spl_values[:naive_max])
-    #     e1 = optimize.fsolve(dspl, naive_max-5)
-    #     e2 = optimize.fsolve(dspl, naive_min+5)
     extrema = np.argwhere(np.diff(np.sign(dspl(x)))).ravel()
-    #     extrema = np.array([naive_min, naive_max])
-
     extrema_values = spl(extrema)
-    if plot:
-        ax1.plot(extrema, extrema_values, "ko")
+
+    # If no extrema are found within the trace, return NaNs
     if np.all(np.logical_or(extrema < 0, extrema > len(trace))):
         beta = np.nan * np.ones(5)
         return beta, spl
+
+    # Find position and value of the global maximum
     global_max_index = np.argmax(extrema_values)
     global_max = extrema[global_max_index]
     global_max_val = extrema_values[global_max_index]
+    min_val = np.nanpercentile(spl_values[:global_max], 10)
+    halfmax_magnitude = (global_max_val - min_val) / 2 + min_val
 
-    d2 = d2spl(extrema)
-    maxima_indices = np.argwhere(d2 < 0).ravel()
-    ss = np.std(extrema_values[maxima_indices])
-    sm = np.mean(extrema_values[maxima_indices])
-    # print(ss)
-    # print((extrema_values[global_max_index]-sm)/ss)
-    minima_indices = np.argwhere(d2 > 0).ravel()
-    if len(minima_indices) == 0:
-        last_min_before_max = 0
-    else:
-        minima = extrema[minima_indices]
-        premax_minima_indices = np.argwhere(minima < global_max).ravel()
-        if len(premax_minima_indices) == 0:
-            last_min_before_max = 0
-        else:
-            last_min_before_max = minima[premax_minima_indices[-1]]
     if plot:
-        ax1.plot(
-            [last_min_before_max, global_max],
-            spl([last_min_before_max, global_max]),
-            "rx",
-        )
-    # min_val = spl(last_min_before_max)
+        # Plot results
+        if ax1 is None:
+            _, ax1 = plt.subplots(figsize=(12, 4))
+        ax1.plot(trace)
+        ax1.plot(spl(x))
+        ax1.plot(extrema, extrema_values, "ko")
+        ax1.axhline(float(min_val), color="r", linestyle="--")
+        ax1.axhline(halfmax_magnitude, color="orange", linestyle="--")
 
     try:
-        min_val = np.nanpercentile(spl_values[:global_max], 10)
-        halfmax_magnitude = (global_max_val - min_val) / 2 + min_val
-        #         halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
-        #                                        bounds=[last_min_before_max, global_max]).x
-        try:
-            # hm = np.argmin((spl_values[last_min_before_max:global_max]-\
-            # halfmax_magnitude)**2) + last_min_before_max
-            reversed_values = np.flip(spl_values[:global_max])
-            moving_away_from_hm = np.diff(reversed_values - halfmax_magnitude) ** 2 > 0
-            close_to_hm = (reversed_values - halfmax_magnitude) ** 2 < (
-                (global_max_val - min_val) * 5 / global_max
-            ) ** 2
-            hm = (
-                global_max
-                - np.argwhere(close_to_hm[:-1] & moving_away_from_hm).ravel()[0]
+        reversed_values = np.flip(spl_values[:global_max])
+        # moving_away_from_hm = (np.diff(reversed_values - halfmax_magnitude) ** 2) > 0
+        moving_away_from_hm = np.diff((reversed_values - halfmax_magnitude) ** 2) > 0
+
+        # Estimate whether a particular index is close to the half-maximum by comparing the
+        # squared difference between the value at that index and the half-maximum to the
+        # squared difference between the global maximum and the minimum value.
+        close_to_hm = (reversed_values - halfmax_magnitude) ** 2 < (
+            (global_max_val - min_val) * 5 / global_max
+        ) ** 2
+
+        # Identify the index of the half-maximum by finding the first index where the value is both
+        # close to the half-maximum and moving away from the half-maximum. This is done for
+        # robustness to fluctuations in the trace that are small relative to the spike magnitude.
+        hm = (
+            global_max
+            - np.argwhere(close_to_hm[:-1] & moving_away_from_hm).ravel()[0]
+        )
+        # Iterate to refine estimate
+        hm0 = hm
+        for _ in range(n_iterations):
+            hm1 = utils.custom_newton_lsq(
+                hm0, halfmax_magnitude, spl, dspl, bounds=(hm - 3, hm + 3)
             )
-            # hm = np.argmin((spl_values[:global_max]-\
-            # halfmax_magnitude)**2)
-            #             halfmax = optimize.minimize_scalar(lambda x: (spl(x) - halfmax_magnitude)**2, method='bounded', \
-            #                                            bounds=[hm-1, hm+1]).x
-            hm0 = hm
-            for j in range(n_iterations):
-                hm1 = custom_newton_lsq(hm0, halfmax_magnitude, bounds=[hm - 3, hm + 3])
-                if (hm1 - hm0) ** 2 < eps**2:
-                    break
-                hm0 = hm1
-            halfmax = hm1
+            if (hm1 - hm0) ** 2 < eps**2:
+                break
+            hm0 = hm1
+        halfmax = hm0
 
-            local_max_deriv_idx = np.argwhere(np.diff(np.sign(d2spl(x)))).ravel()
-            local_max_deriv_idx = local_max_deriv_idx[local_max_deriv_idx < global_max]
-            if len(local_max_deriv_idx) > 0:
-                max_deriv_idx = local_max_deriv_idx[
-                    np.argmin((local_max_deriv_idx - halfmax) ** 2)
-                ]
-                max_deriv_interp = max_deriv_idx + (0 - d2spl(max_deriv_idx)) / (
-                    d2spl(max_deriv_idx + 1) - d2spl(max_deriv_idx)
-                )
-            else:
-                max_deriv_interp = np.nan
-
-        except IndexError as e:
-            # print(e)
-            beta = np.nan * np.ones(5)
-            return beta, spl
-        if plot:
-            ax1.plot(halfmax, spl(halfmax), "gx")
-            ax1.plot(max_deriv_interp, spl(max_deriv_interp), "bx")
-    except Exception as e:
-        # print(e)
+        # Look for sign changes in the second derivative of the spline to identify the position 
+        # of the maximum first derivative (another method of identifying wavefronts).
+        local_max_deriv_idx = np.argwhere(np.diff(np.sign(d2spl(x)))).ravel()
+        local_max_deriv_idx = local_max_deriv_idx[local_max_deriv_idx < global_max]
+        if len(local_max_deriv_idx) > 0:
+            max_deriv_idx = local_max_deriv_idx[
+                np.argmin((local_max_deriv_idx - halfmax) ** 2)
+            ]
+            max_deriv_interp = max_deriv_idx + (0 - d2spl(max_deriv_idx)) / (
+                d2spl(max_deriv_idx + 1) - d2spl(max_deriv_idx)
+            )
+        else:
+            max_deriv_interp = np.nan
+    except IndexError:
         beta = np.nan * np.ones(5)
         return beta, spl
+    
     beta = np.array(
         [global_max, halfmax, global_max_val / min_val, res, max_deriv_interp]
     )
-    if plot:
+
+    if plot and ax1:
+        ax1.plot(halfmax, spl(halfmax), "gx")
+        ax1.plot(max_deriv_interp, spl(max_deriv_interp), "bx")
         return beta, spl, ax1
     else:
         return beta, spl
@@ -1632,7 +1617,7 @@ def get_heart_mask(
     for i, comp in enumerate(pca.components_):
         # Filter outlier regions based on size
         pc_img = np.abs(comp.reshape(img.shape[1], img.shape[2]))
-        mask = pc_img > 4*np.std(pc_img)
+        mask = pc_img > 4 * np.std(pc_img)
         mask = morphology.binary_opening(mask, footprint=np.ones((3, 3)))
         mask = morphology.binary_closing(mask, footprint=np.ones((3, 3)))
         labels = measure.label(mask)
@@ -1640,7 +1625,7 @@ def get_heart_mask(
         if len(areas) < 2:
             valid_size[i] = False
             continue
-        max_area_loc = np.argmax(areas[1:])+1
+        max_area_loc = np.argmax(areas[1:]) + 1
         max_area = areas[max_area_loc]
         valid_size[i] = (max_area > min_size) & (max_area < max_size)
         rough_masks[i] = labels == max_area_loc
@@ -1657,7 +1642,7 @@ def get_heart_mask(
         )
 
     n_valid_components = np.sum(valid_components)
-    print(n_valid_components, end= ", ")
+    print(n_valid_components, end=", ")
     if n_valid_components == 0:
         return np.zeros((img.shape[1], img.shape[2]), dtype=bool)
 

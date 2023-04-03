@@ -7,7 +7,7 @@ import warnings
 import importlib
 import os
 from os import PathLike
-from typing import Union, List, Tuple, Dict, Any
+from typing import Union, List, Tuple, Dict, Any, Callable
 
 import numpy as np
 from numpy import typing as npt
@@ -20,6 +20,36 @@ from scipy import interpolate, signal
 import re
 import pandas as pd
 import mat73
+
+
+
+def custom_newton_lsq(
+    x: float,
+    y: float,
+    gx: Callable[[npt.ArrayLike], npt.NDArray],
+    dgx: Callable[[npt.ArrayLike], npt.NDArray],
+    bounds: Tuple[float, float] = (-np.inf, np.inf),
+) -> float:
+    """solve for the x that gives a particular value of a function g, i.e. (g(x) - y)**2 = 0
+
+    Args:
+        x: initial guess
+        y: known value of g(x)
+        gx: function g(x)
+        dgx: derivative of g(x)
+        bounds: bounds for the solution
+    Returns:
+        x1: Updated guess for the solution
+
+    """
+    y_est = float(gx(x))
+    dy_est = float(dgx(x))
+    fx = y_est**2 - 2 * y * y_est + y**2
+    dfx = 2 * dy_est * y_est - 2 * y * dy_est
+    x1 = x - fx / dfx
+    x1 = max(bounds[0], x1)
+    x1 = min(bounds[1], x1)
+    return x1
 
 
 def round_rel_deviation(a, factor=100):

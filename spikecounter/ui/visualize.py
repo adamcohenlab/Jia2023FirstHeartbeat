@@ -1,6 +1,7 @@
 from typing import Union, Tuple, List, Any
 
 import matplotlib as mpl
+from matplotlib import axes, figure
 import matplotlib.pyplot as plt
 from skimage.measure import regionprops
 import numpy as np
@@ -142,27 +143,27 @@ def stackplot(
     y: npt.ArrayLike,
     xvals: Union[npt.ArrayLike, None] = None,
     figsize_single: Tuple[float, float] = (12, 1),
-    ax: Union[mpl.axes.Axes, None] = None,
+    ax: Union[axes.Axes, None] = None,
     offset: Union[float, None] = None,
     cmap: Union[mpl.colors.Colormap, None] = None,
     flipud: bool = False,
     **plot_args
-) -> Tuple[mpl.figure.Figure, mpl.axes.Axes, List[Any], float]:
+) -> Tuple[figure.Figure, axes.Axes, List[Any], float]:
     """Plot a collection of traces with a common x-axis offset by a constant amount.
 
     Useful for looking at dynamics with a common time axis and similar amplitudes.
 
     Args:
-        y (npt.ArrayLike): 2D array of traces to plot. Each row is a trace.
-        xvals (Union[npt.ArrayLike,None], optional): x-axis values.
+        y: 2D array of traces to plot. Each row is a trace.
+        xvals: x-axis values.
             Defaults to None.
-        figsize_single (Tuple[float, float], optional): Size of each trace.
+        figsize_single: Size of each trace.
             Defaults to (12,1).
-        ax (Union[mpl.axes.Axes, None], optional): Axis to plot on.
+        ax: Axis to plot on.
             If None, creates a new figure. Defaults to None.
-        offset (Union[float, None], optional): Offset between traces.
+        offset: Offset between traces.
             If None, uses the maximum amplitude of each trace. Defaults to None.
-        cmap (Union[mpl.colors.Colormap, None], optional): Colormap to use.
+        cmap: Colormap to use.
             If None, uses the default color cycle. Defaults to None.
         flipud (bool, optional): Flip the order of the traces.
             Defaults to False.
