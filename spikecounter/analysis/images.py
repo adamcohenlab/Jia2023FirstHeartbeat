@@ -4,7 +4,7 @@
 from pathlib import Path
 from os import PathLike
 import os
-from typing import Tuple, Union, Callable, Any, List
+from typing import Tuple, Union, Callable, TypeVar, Any, List
 import pickle
 import warnings
 
@@ -41,6 +41,7 @@ from .. import utils
 from ..ui import visualize
 
 MAX_INT32 = np.iinfo(np.int32).max
+T = TypeVar("T", bound=npt.NBitBase)
 
 
 def regress_video(
@@ -581,8 +582,8 @@ def spline_fit_single_trace(
     eps: float = 0.01,
     ax1: Union[axes.Axes, None] = None,
 ) -> Union[
-    Tuple[npt.NDArray, interpolate.BSpline],
-    Tuple[npt.NDArray, interpolate.BSpline, axes.Axes],
+    Tuple[npt.NDArray[np.floating[T]], interpolate.BSpline],
+    Tuple[npt.NDArray[np.floating[T]], interpolate.BSpline, axes.Axes],
 ]:
     """Least squares spline fitting of a single timeseries
 
@@ -653,10 +654,7 @@ def spline_fit_single_trace(
         # Identify the index of the half-maximum by finding the first index where the value is both
         # close to the half-maximum and moving away from the half-maximum. This is done for
         # robustness to fluctuations in the trace that are small relative to the spike magnitude.
-        hm = (
-            global_max
-            - np.argwhere(close_to_hm[:-1] & moving_away_from_hm).ravel()[0]
-        )
+        hm = global_max - np.argwhere(close_to_hm[:-1] & moving_away_from_hm).ravel()[0]
         # Iterate to refine estimate
         hm0 = hm
         for _ in range(n_iterations):
@@ -668,7 +666,7 @@ def spline_fit_single_trace(
             hm0 = hm1
         halfmax = hm0
 
-        # Look for sign changes in the second derivative of the spline to identify the position 
+        # Look for sign changes in the second derivative of the spline to identify the position
         # of the maximum first derivative (another method of identifying wavefronts).
         local_max_deriv_idx = np.argwhere(np.diff(np.sign(d2spl(x)))).ravel()
         local_max_deriv_idx = local_max_deriv_idx[local_max_deriv_idx < global_max]
@@ -684,7 +682,7 @@ def spline_fit_single_trace(
     except IndexError:
         beta = np.nan * np.ones(5)
         return beta, spl
-    
+
     beta = np.array(
         [global_max, halfmax, global_max_val / min_val, res, max_deriv_interp]
     )
@@ -697,13 +695,28 @@ def spline_fit_single_trace(
         return beta, spl
 
 
-def spline_timing(img, s=0.1, n_knots=4, upsample_rate=1):
-    """Perform spline fitting to functional imaging data do determine wavefront timing"""
+def spline_timing(
+    img: npt.NDArray, s: float = 0.1, n_knots: int = 4, upsample_rate: float = 1
+):
+    """Perform spline fitting to functional imaging data do determine wavefront timing
+
+    Args:
+        img : 3D array of functional imaging data (time x y x z)
+        s : smoothing parameter for spline fitting
+        n_knots : number of knots to use for spline fitting
+        upsample_rate : factor by which to upsample the video
+    Returns:
+        beta : 3D array of fit parameters (6 x y x z): absolute height, half-maximum time, relative
+            amplitude, residual, time of maximum dx/dt, temporal noise
+        smoothed_vid : 3D array of smoothed video (time x y x z)
+    """
     knots = np.linspace(0, img.shape[0] - 1, num=n_knots)[1:-1]
     q = np.apply_along_axis(lambda tr: spline_fit_single_trace(tr, s, knots), 0, img)
+    # Convert fit parameters in beta to images
     beta = np.moveaxis(
         np.array(list(q[0].ravel())).reshape((img.shape[1], img.shape[2], -1)), 2, 0
     )
+    # Smooth the video using the spline fits and optionally upsample
     x = np.arange(img.shape[0] * upsample_rate) / upsample_rate
     smoothed_vid = np.array([spl(x) for spl in q[1].ravel()])
     smoothed_vid = np.moveaxis(

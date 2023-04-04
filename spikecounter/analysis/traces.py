@@ -23,8 +23,8 @@ import pywt
 
 plt.style.use(Path(__file__).parent / "../../config" / "bio_pubs_presentation.mplstyle")
 
-def calculate_lags(pks, start_idx, end_idx, ref_indices, plot=True, forward_only=True):
 
+def calculate_lags(pks, start_idx, end_idx, ref_indices, plot=True, forward_only=True):
     if len(pks) == 0:
         return np.array([]), np.array([]), np.array([]), 0
 
@@ -285,23 +285,41 @@ def correct_photobleach(
 
 
 def intensity_to_dff(
-    intensity, percentile_threshold=10, moving_average=False, window=None
-):
-    """Calculate DF/F from intensity counts"""
+    intensity: npt.ArrayLike,
+    percentile_threshold: float = 10,
+    axis: int = 0,
+    moving_average: bool = False,
+    window: Union[int, None] = None,
+) -> npt.NDArray:
+    """Calculate DF/F from intensity counts
+
+    Args:
+        intensity: Intensity counts
+        percentile_threshold: Percentile threshold for baseline. Defaults to 10.
+        axis: Axis to calculate baseline. Defaults to 0.
+        moving_average: Use moving average for baseline. Defaults to False.
+        window: Window length for moving average. Defaults to None.
+    Returns:
+        Delta F/F of trace
+    """
     if moving_average:
-        if window is not None:
-            raise Exception("Window length required")
+        if window is None:
+            raise ValueError("Window length required")
         kernel = np.ones(window) / window
-        ma = signal.fftconvolve(intensity, kernel, mode="same")
+        ma = signal.fftconvolve(intensity, kernel, axes=axis, mode="same")
         dFF = intensity / ma
     else:
         if window is not None:
-            raise Exception("Windowed percentile not yet implemented")
+            raise ValueError("Windowed percentile not yet implemented")
 
-        baseline = np.mean(
-            intensity[intensity < np.percentile(intensity, percentile_threshold)]
-        )
+        percentile_10 = np.percentile(intensity, percentile_threshold, axis=axis)[
+            ..., None
+        ]
+        masked_intensity = np.ma.masked_array(intensity, intensity < percentile_10)
+
+        baseline = np.nanmean(masked_intensity, axis=axis)[..., None]
         dFF = (intensity - baseline) / baseline
+        dFF = np.ma.getdata(dFF)
     return dFF
 
 
@@ -315,30 +333,53 @@ def standard_lp_filter(raw, norm_thresh=0.5):
 
 
 def analyze_peaks(
-    trace,
-    prominence="auto",
-    wlen=400,
-    threshold=0,
-    f_s=1,
-    auto_prom_scale=0.5,
-    auto_thresh_scale=0.5,
-    auto_thresh_pct=95,
-    min_width=None,
-    max_width=None,
-    baseline_start=0,
-    baseline_duration=1000,
-    excl=0,
+    trace: npt.NDArray,
+    prominence: Union[str, float] = "auto",
+    wlen: int = 400,
+    threshold: Union[str, float] = 0,
+    f_s: float = 1,
+    auto_prom_scale: float = 0.5,
+    auto_thresh_scale: float = 0.5,
+    auto_thresh_pct: float = 95,
+    min_prom: float = 0,
+    min_width: Union[int, None] = None,
+    max_width: Union[int, None] = None,
+    baseline_start: int = 0,
+    baseline_duration: int = 1000,
+    excl: int = 0,
+    return_full: bool = False,
 ):
-    """Analyze peaks within a given trace and return the following statistics, organized in a pandas DataFrame:
+    """Analyze peaks within a given trace and return the following statistics, organized in a pandas
+    DataFrame.
 
-    peak_idx: index where each peak is
-    prominence: height above baseline
-    fwhm: full-width half-maximum
-
+    Args:
+        trace: 1D array of trace to analyze
+        prominence: prominence of peaks to detect. If "auto", will use 98th percentile of trace
+            times auto_prom_scale. If "snr", will use standard deviation of baseline times
+            auto_prom_scale. Defaults to "auto".
+        wlen: window length for peak detection. Defaults to 400.
+        threshold: threshold for peak detection. If "auto", will use 95th percentile of trace
+            times auto_thresh_scale. Defaults to 0.
+        f_s: sampling frequency. Defaults to 1.
+        auto_prom_scale: scale factor for auto prominence. Defaults to 0.5.
+        auto_thresh_scale: scale factor for auto threshold. Defaults to 0.5.
+        auto_thresh_pct: percentile for auto threshold. Defaults to 95.
+        min_prom: minimum prominence for peak detection. Defaults to 0.
+        min_width: minimum width for peak detection. Defaults to None.
+        max_width: maximum width for peak detection. Defaults to None.
+        baseline_start: start of baseline for SNR calculation. Defaults to 0.
+        baseline_duration: duration of baseline for SNR calculation. Defaults to 1000.
+        excl: number of points to exclude from peak detection. Defaults to 0.
+        return_full: return threshold and prominence parametesr in addition to peak finding results.
+            Defaults to False.
+    Returns:
+        DataFrame of peak statistics
+        (Optional) threshold, prominence parameters
     """
-    # print(prominence)
+
     if prominence == "auto":
-        p = np.nanpercentile(trace, 95) * auto_prom_scale
+        p = np.nanpercentile(trace, 98) * auto_prom_scale
+        p = max(p, min_prom)
     elif prominence == "snr":
         noise = np.std(
             trace.ravel()[baseline_start : baseline_start + baseline_duration]
@@ -351,8 +392,6 @@ def analyze_peaks(
         t = np.nanpercentile(trace, auto_thresh_pct) * auto_thresh_scale
     else:
         t = threshold
-
-    print(p, t)
 
     peaks, properties = signal.find_peaks(
         trace,
@@ -367,21 +406,19 @@ def analyze_peaks(
     prominences = prominences[peaks > excl * f_s]
     peaks = peaks[peaks > excl * f_s]
     fwhm = signal.peak_widths(trace, peaks, rel_height=0.5)[0] / f_s
-    isi = (peaks[1:] - peaks[:-1]) / f_s
-    isi = np.append(isi, np.nan)
+    isi = np.diff(peaks, append=np.nan) / f_s
     if len(peaks) == 0:
+        if return_full:
+            return None, p, t
         return None
-    try:
-        res = pd.DataFrame(
-            {"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi}
-        )
-    except Exception as e:
-        print(peaks.shape)
-        print(prominences.shape)
-        print(fwhm.shape)
-        print(isi.shape)
-        raise e
-    return res
+    res = pd.DataFrame(
+        {"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi}
+    )
+
+    if return_full:
+        return res, p, t
+    else:
+        return res
 
 
 def first_trough_exp_fit(st_traces, before, after, f_s=1):
