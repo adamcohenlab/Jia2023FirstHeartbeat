@@ -405,7 +405,7 @@ def analyze_peaks(
     prominences = np.array(properties["prominences"])
     prominences = prominences[peaks > excl * f_s]
     peaks = peaks[peaks > excl * f_s]
-    fwhm = signal.peak_widths(trace, peaks, rel_height=0.5)[0] / f_s
+    fwhm = signal.peak_widths(trace, peaks, rel_height=0.5, wlen=wlen)[0] / f_s
     isi = np.diff(peaks, append=np.nan) / f_s
     if len(peaks) == 0:
         if return_full:
@@ -413,7 +413,7 @@ def analyze_peaks(
         return None
     res = pd.DataFrame(
         {"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi}
-    )
+    ).sort_values("peak_idx").reset_index(drop=True)
 
     if return_full:
         return res, p, t

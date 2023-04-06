@@ -1,7 +1,7 @@
-from typing import Union, Tuple, List, Any
+from typing import Union, Tuple, List, Any, Sequence, Collection
 
 import matplotlib as mpl
-from matplotlib import axes, figure
+from matplotlib import axes, figure, patches
 import matplotlib.pyplot as plt
 from skimage.measure import regionprops
 import numpy as np
@@ -47,10 +47,27 @@ def get_line_labels(lns):
     return [l.get_label() for l in lns]
 
 
-def tile_plots_conditions(condition_list, subplot_size, n_rows=None, disp_titles=True):
-    """Generate subplots for the same graph over a large number of conditions
+def tile_plots_conditions(
+    condition_list: Union[Sequence, Collection],
+    subplot_size: Tuple[int, int],
+    n_rows: Union[int, None] = None,
+    disp_titles: bool = True,
+    show_axis: bool = True,
+) -> Tuple[figure.Figure, axes.Axes]:
+    """Generate subplots for the same graph over a large number of conditions.
+
     INCOMPLETE
+
+    Args:
+        condition_list: List of conditions for each subplot
+        subplot_size: Size of each subplot
+        n_rows: Number of rows in the subplot grid - used to determine number of columns
+        disp_titles: Display condition titles on each subplot
+        show_axis: Show axis on each subplot
+    Returns:
+        Fuigure and axis
     """
+    # Calculate number of rows and columns
     n_plots = len(condition_list)
     if n_rows is None:
         n_rows = int(np.ceil(np.sqrt(n_plots)))
@@ -61,16 +78,20 @@ def tile_plots_conditions(condition_list, subplot_size, n_rows=None, disp_titles
     else:
         n_cols = n_plots // n_rows
 
-    fig1, axes = plt.subplots(
+    # Generate subplots
+    fig1, axs = plt.subplots(
         n_rows, n_cols, figsize=(subplot_size[0] * n_cols, subplot_size[1] * n_rows)
     )
     if n_rows == 1:
-        axes = np.array([axes])
-    axes = axes.ravel()
+        axs = np.array([axs])
+    axs = axs.ravel()
     if disp_titles:
         for idx, c in enumerate(condition_list):
-            axes[idx].set_title(c)
-    return fig1, axes
+            axs[idx].set_title(c)
+    if not show_axis:
+        for ax in axs:
+            ax.set_axis_off()
+    return fig1, axs
 
 
 def plot_scalebars(ax, scalebar_params, time_unit="s", pct_f=False, newline=False):
