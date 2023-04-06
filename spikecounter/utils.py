@@ -169,12 +169,12 @@ def load_experiment_metadata(
     else:
         metadata_path = Path(root_dir, expt_name, "experimental_parameters.txt")
         try:
-            expt_data = {"camera": {"roi": [0, 0, 0, 0]}}
+            expt_data = {"cameras": [{"roi": [0, 0, 0, 0]}]}
             with metadata_path.open() as f:
-                expt_data["camera"]["roi"][1] = int(
+                expt_data["cameras"][0]["roi"][1] = int(
                     re.search("\d+", f.readline()).group(0)
                 )
-                expt_data["camera"]["roi"][3] = int(
+                expt_data["cameras"][0]["roi"][3] = int(
                     re.search("\d+", f.readline()).group(0)
                 )
         except FileNotFoundError as err:

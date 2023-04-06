@@ -582,8 +582,8 @@ def spline_fit_single_trace(
     eps: float = 0.01,
     ax1: Union[axes.Axes, None] = None,
 ) -> Union[
-    Tuple[npt.NDArray[np.floating[T]], interpolate.BSpline],
-    Tuple[npt.NDArray[np.floating[T]], interpolate.BSpline, axes.Axes],
+    Tuple[npt.NDArray[np.floating], interpolate.BSpline],
+    Tuple[npt.NDArray[np.floating], interpolate.BSpline, axes.Axes],
 ]:
     """Least squares spline fitting of a single timeseries
 
