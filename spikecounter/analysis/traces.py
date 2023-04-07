@@ -675,7 +675,8 @@ def spike_match_to_kernel(
 
 def analyze_sta(
     trace,
-    peak_indices, bounds
+    peak_indices, 
+    bounds,
     f_s=1,
     normalize_height=True,
     fitting_function=first_trough_exp_fit,
@@ -768,7 +769,7 @@ def masked_peak_statistics(
 
     if sta_bounds:
         if trace is None:
-            raise Exception(
+            raise ValueError(
                 "Trace and duration must be provided for spike triggered average"
             )
         sta, ststd, sta_stats = analyze_sta(trace, locs, sta_bounds)
@@ -1185,9 +1186,13 @@ class TimelapseArrayExperiment:
             window_indices = np.arange(
                 0, self.dFF.shape[1] - window_size, step=int(window_size - overlap * window_size)
             )
-
-            sta = np.zeros((len(window_indices), sta_before + sta_after))
-            ststd = np.zeros((len(window_indices), sta_before + sta_after))
+            
+            if sta_bounds:
+                sta = np.zeros((len(window_indices), sta_bounds[0] + sta_bounds[1]))
+                ststd = np.zeros((len(window_indices), sta_bounds[0] + sta_bounds[1]))
+            else:
+                sta = None
+                ststd = None
 
             for wi_idx, wi in enumerate(window_indices):
                 mask = (peak_indices >= wi) * (peak_indices < (wi + window_size))
@@ -1205,19 +1210,13 @@ class TimelapseArrayExperiment:
                             last_peak_in_segment = left_of_segment_edge[-1]
                             mask[last_peak_in_segment] = False
                             # return None
-                if sta_after + sta_before > 0:
-                    sta_stats = True
-                else:
-                    sta_stats = False
                 try:
                     roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(
                         peak_data,
                         mask,
                         f_s=self.f_s,
-                        sta_stats=sta_stats,
                         trace=self.dFF[roi, :],
-                        sta_before=sta_before,
-                        sta_after=sta_after,
+                        sta_bounds = sta_bounds,
                         min_peaks=isi_stat_min_peaks,
                     )
                 except Exception as e:
@@ -1238,9 +1237,9 @@ class TimelapseArrayExperiment:
                     / (window_size - np.sum(self.missing_data[wi : wi + window_size]))
                     * self.f_s
                 )
-
-                sta[wi_idx, :] = roi_sta
-                ststd[wi_idx, :] = roi_ststd
+                if sta_bounds:
+                    sta[wi_idx, :] = roi_sta
+                    ststd[wi_idx, :] = roi_ststd
                 spike_stats_by_roi.append(roi_spike_stats)
 
             sta_embryos[roi] = sta
@@ -1280,7 +1279,7 @@ class TimelapseArrayExperiment:
         figsize: Tuple[int, int] = (12, 4),
         time: str = "s",
         x_lim: Union[Tuple[float, float], None] = None,
-    ) -> Tuple[figure.Figure, List[axes.Axes]]:
+    ) -> Tuple[figure.Figure, Collection[axes.Axes]]:
         """Plot spikes found using find_peaks on DF/F
 
         Args:
@@ -1310,7 +1309,7 @@ class TimelapseArrayExperiment:
         fig1, axs = plt.subplots(
             n_rows, n_cols, figsize=(figsize[0], figsize[1] * n_rows), squeeze=False
         )
-        axs = list(np.array(axs).ravel())
+        axs = np.array(axs).ravel()
         t, _ = self._get_time(time)
 
         for idx, ax in enumerate(axs):
