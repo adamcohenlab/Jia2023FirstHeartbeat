@@ -3,7 +3,10 @@
 # see: https://github.com/garrettj403/SciencePlots
 
 # Set color cycle: seaborn muted
-axes.prop_cycle : cycler('color', ['4878d0', 'ee854a', '00cc00', 'd65f5f', '956cb4', '8c613c', 'dc7ec0', '797979', 'd5bb67', '82c6e2'])
+# axes.prop_cycle : cycler('color', ['4878d0', 'ee854a', '00cc00', 'd65f5f', '956cb4', '8c613c', 'dc7ec0', '797979', 'd5bb67', '82c6e2'])
+
+# Set color cycle: Tol bright
+axes.prop_cycle : cycler('color', ['4477aa', 'ee6677', '228833', 'ccbb44', '66ccee', 'aa3377', 'bbbbbb'])
 
 # Set default figure size
 figure.figsize : 3.3, 2.5  # max width is 3.5 for single column

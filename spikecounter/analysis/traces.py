@@ -2,7 +2,7 @@
 """
 import os
 from pathlib import Path
-from typing import Union, Iterable, Tuple, Collection
+from typing import Union, Iterable, Tuple, Collection, Dict
 from numpy import typing as npt
 
 import pandas as pd
@@ -698,15 +698,18 @@ def analyze_sta(
     return sta, ststd, sta_stats
 
 
-def masked_peak_statistics(
+def get_peak_statistics(
     df,
-    mask,
-    f_s=1,
-    min_peaks=6,
-    trace=None,
-    sta_bounds: Union[Tuple[int, int], None] = None
-):
-    """Generate statistics on a set of detected peaks after masking (e.g. subsetting or throwing out bad data)"""
+    min_peaks=6
+) -> pd.Series:
+    """Generate statistics on a set of detected peaks
+    
+    Args:
+        df: DataFrame containing peak information
+        min_peaks: Minimum number of peaks required to calculate standard deviation
+    Returns:
+        pandas Series containing statistics on the peaks
+    """
     if len(df.shape) == 1:
         mean_prom = np.nan
         std_prom = np.nan
@@ -718,38 +721,27 @@ def masked_peak_statistics(
         mean_isi = np.nan
         n_peaks = np.nan
     else:
-        if len(mask) != df.shape[0]:
-            raise Exception(
-                "Mask (%d) must be same length as number of peaks (%d)"
-                % (len(mask), df.shape[0])
-            )
-
-        masked_df = df.loc[mask]
-
-        mean_prom = np.mean(masked_df["prominence"])
-        std_prom = np.std(masked_df["prominence"])
-        mean_width = np.mean(masked_df["fwhm"])
+        mean_prom = np.mean(df["prominence"])
+        std_prom = np.std(df["prominence"])
+        mean_width = np.mean(df["fwhm"])
         try:
-            pct95_dff = np.percentile(masked_df["prominence"], 95)
-            pct5_dff = np.percentile(masked_df["prominence"], 5)
-            max_dff = np.max(masked_df["prominence"])
-            min_dff = np.min(masked_df["prominence"])
+            pct95_dff = np.percentile(df["prominence"], 95)
+            pct5_dff = np.percentile(df["prominence"], 5)
+            max_dff = np.max(df["prominence"])
+            min_dff = np.min(df["prominence"])
         except Exception:
             pct95_dff = np.nan
             pct5_dff = np.nan
             max_dff = np.nan
             min_dff = np.nan
-
-        locs = np.array(masked_df["peak_idx"])
-        n_peaks = len(locs)
-        mean_isi = np.mean(masked_df["isi"])
-
-    if np.sum(mask) < min_peaks:
-        std_isi = np.nan
-        std_width = np.nan
-    else:
-        std_isi = np.std(masked_df["isi"])
-        std_width = np.std(masked_df["fwhm"])
+        n_peaks = df.shape[0]
+        mean_isi = np.mean(df["isi"])
+        if n_peaks < min_peaks:
+            std_isi = np.nan
+            std_width = np.nan
+        else:
+            std_isi = np.std(df["isi"])
+            std_width = np.std(df["fwhm"])
 
     peak_stats = pd.Series(
         {
@@ -767,21 +759,7 @@ def masked_peak_statistics(
         }
     )
 
-    if sta_bounds:
-        if trace is None:
-            raise ValueError(
-                "Trace and duration must be provided for spike triggered average"
-            )
-        sta, ststd, sta_stats = analyze_sta(trace, locs, sta_bounds)
-    else:
-        sta = None
-        ststd = None
-        sta_stats = None
-
-    if sta_stats is not None:
-        peak_stats = peak_stats.append(sta_stats)
-
-    return peak_stats, sta, ststd
+    return peak_stats
 
 
 def plot_mean_frequency(spike_stats_by_roi, embryos=[]):
@@ -1150,14 +1128,27 @@ class TimelapseArrayExperiment:
         overlap: float = 0.5,
         isi_stat_min_peaks: int = 7,
         sta_bounds: Union[Tuple[int, int], None] = None
-    ):
+    ) -> Tuple[pd.DataFrame, Union[Dict, None], Union[Dict, None]]:
         """Get ISI statistics averaged over a moving window
+
+        Args:
+            window_size: Size of window in indices
+            prominence: Minimum prominence of peaks to include. Defaults to None.
+            height: Minimum height of peaks to include. Defaults to None.
+            overlap: Overlap between windows. Defaults to 0.5.
+            isi_stat_min_peaks: Minimum number of peaks to calculate ISI statistics. Defaults to 7.
+            sta_bounds: Tuple of start and end times for STA calculation. Defaults to None.
+        Returns:
+            Tuple of:
+                dataframe containing ISI statistics per time window
+                dictionaries of average and standard deviation of spike-triggered dFF traces per
+                    time window, keyed by embryo
         
         """
         if self.peaks_data is None:
             raise AttributeError("peaks_data not defined. Run analyze_peaks() first")
-        if self.dFF is None:
-            raise AttributeError("dFF not defined. Run load_traces() first")
+        if self.dFF is None or self.t is None or self.missing_data is None:
+            raise AttributeError("Traces are not defined. Run load_traces() first")
 
         sta_embryos = {}
         ststd_embryos = {}
@@ -1166,6 +1157,7 @@ class TimelapseArrayExperiment:
 
         for roi in self.peaks_data.index.unique():
             peak_data = self.peaks_data.loc[roi]
+            # Apply height and prominence filters to peaks
             filter_mask = np.ones(peak_data.shape[0], dtype=bool)
             if prominence is not None:
                 filter_mask = np.bitwise_and(
@@ -1180,8 +1172,10 @@ class TimelapseArrayExperiment:
                     > height
                     * np.percentile(self.dFF[roi, :][peak_data["peak_idx"]], 95),
                 )
-
             peak_data = peak_data[filter_mask]
+            if len(peak_data.shape) == 1:
+                continue
+
             peak_indices = np.array(peak_data["peak_idx"])
             window_indices = np.arange(
                 0, self.dFF.shape[1] - window_size, step=int(window_size - overlap * window_size)
@@ -1195,11 +1189,11 @@ class TimelapseArrayExperiment:
                 ststd = None
 
             for wi_idx, wi in enumerate(window_indices):
+                # Select peaks that are within a time window
                 mask = (peak_indices >= wi) * (peak_indices < (wi + window_size))
-                try:
-                    iter(mask)
-                except TypeError:
+                if ~isinstance(mask, np.ndarray):
                     mask = np.array([mask])
+                mask = np.squeeze(mask)
 
                 for edge_pair in segment_edges:
                     if edge_pair[1] >= wi and edge_pair[1] < wi + window_size:
@@ -1210,13 +1204,12 @@ class TimelapseArrayExperiment:
                             last_peak_in_segment = left_of_segment_edge[-1]
                             mask[last_peak_in_segment] = False
                             # return None
+                masked_peak_df = peak_data.loc[mask.ravel()]
+
+                # Get peak statistics
                 try:
-                    roi_spike_stats, roi_sta, roi_ststd = masked_peak_statistics(
-                        peak_data,
-                        mask,
-                        f_s=self.f_s,
-                        trace=self.dFF[roi, :],
-                        sta_bounds = sta_bounds,
+                    roi_spike_stats = get_peak_statistics(
+                        masked_peak_df,
                         min_peaks=isi_stat_min_peaks,
                     )
                 except Exception as e:
@@ -1237,17 +1230,22 @@ class TimelapseArrayExperiment:
                     / (window_size - np.sum(self.missing_data[wi : wi + window_size]))
                     * self.f_s
                 )
-                if sta_bounds:
+
+                # Optionally collect statistics on spike-triggered average
+                if sta is not None and ststd is not None:
+                    locs = np.array(masked_peak_df["peak_idx"])
+                    roi_sta, roi_ststd, roi_sta_stats = analyze_sta(self.dFF[roi], locs, sta_bounds)
                     sta[wi_idx, :] = roi_sta
                     ststd[wi_idx, :] = roi_ststd
+                    roi_spike_stats = roi_spike_stats.append(roi_sta_stats)
+
                 spike_stats_by_roi.append(roi_spike_stats)
 
             sta_embryos[roi] = sta
             ststd_embryos[roi] = ststd
 
         spike_stats_by_roi = pd.DataFrame(spike_stats_by_roi)
-        spike_stats_by_roi = spike_stats_by_roi.reset_index().set_index("roi")
-        del spike_stats_by_roi["index"]
+        spike_stats_by_roi = spike_stats_by_roi.reset_index(drop=True).set_index("roi")
         return spike_stats_by_roi, sta_embryos, ststd_embryos
 
     ### Plotting functions ###
@@ -1622,6 +1620,10 @@ class TimelapseArrayExperiment:
         return t, timeseries_start
 
     def _find_segment_edges(self):
+        """ Find the edges of each segment of missing data in the time series
+        """
+        if self.missing_data is None:
+            raise AttributeError("Run load_traces() first")
         missing_edges = self.missing_data[1:] - self.missing_data[:-1]
         rising_edge = np.argwhere(missing_edges == 1).ravel()
         falling_edge = np.argwhere(missing_edges == -1).ravel()
