@@ -7,12 +7,13 @@ import warnings
 import importlib
 import os
 from os import PathLike
+from datetime import datetime
 from typing import Union, List, Tuple, Dict, Any, Callable, Generator
 
 import numpy as np
 from numpy import typing as npt
 from skimage import transform
-from datetime import datetime
+
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from ipywidgets import interact
@@ -193,7 +194,7 @@ def process_experiment_metadata(
     expt_metadata: pd.DataFrame,
     regexp_dict: Union[Dict, None] = None,
     dtypes: Union[Dict, None] = None,
-):
+) -> pd.DataFrame:
     """Extract data from filenames in basic metadata table.
 
     Args:
@@ -226,16 +227,21 @@ def process_experiment_metadata(
     return new_df
 
 
-def match_experiments_to_snaps(expt_data, snap_data):
-    # print("test")
+def match_experiments_to_snaps(expt_data: pd.DataFrame, snap_data: pd.DataFrame) -> pd.DataFrame:
+    """Matches experiments to the corresponding snap of the same embryo taken closest in time.
+
+    Args:
+        expt_data: metadata table for experiments
+        snap_data: metadata table for snaps
+    Returns:
+        A metadata table with snap filenames matched to each experiment.
+    """
     snap_files = []
     snap_data_by_embryo = snap_data.set_index("embryo")
     for i in range(expt_data.shape[0]):
         try:
             embryo_snap_data = snap_data_by_embryo.loc[[expt_data.iloc[i]["embryo"]]]
-            # print(embryo_snap_data)
             start_time = datetime.strptime(expt_data.iloc[i]["start_time"], "%H:%M:%S")
-            # print(embryo_snap_data[["start_time"]])
             snap_times = [
                 datetime.strptime(t, "%H:%M:%S")
                 for t in list(embryo_snap_data["start_time"].values.ravel())
@@ -243,13 +249,11 @@ def match_experiments_to_snaps(expt_data, snap_data):
             diffs = [abs(start_time - t).seconds for t in snap_times]
             snap_idx = np.argmin(diffs)
             snap_files.append(embryo_snap_data["file_name"].iloc[snap_idx])
-        except KeyError as e:
-            # print(e)
+        except KeyError:
             snap_files.append(None)
     return pd.concat(
         [expt_data, pd.DataFrame(snap_files, columns=["snap_file"])], axis=1
     )
-    # expt_data["snap_file"] = snap_files
 
 
 def generate_file_list(input_path):
