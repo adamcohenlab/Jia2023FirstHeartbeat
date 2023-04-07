@@ -7,7 +7,7 @@ import warnings
 import importlib
 import os
 from os import PathLike
-from typing import Union, List, Tuple, Dict, Any, Callable
+from typing import Union, List, Tuple, Dict, Any, Callable, Generator
 
 import numpy as np
 from numpy import typing as npt
@@ -71,7 +71,13 @@ def pad_func_unpad(arr, func, pad_width, **pad_params):
     return unpadded
 
 
-def make_iterable(x) -> Any:
+def make_iterable(x: Any) -> Generator[Any, Any, Any]:
+    """ Catch non-iterable objects and make them iterable
+    Args:
+        x (Any): object to be made iterable
+    Returns:
+        Generator[Any, Any, Any]: iterable object
+    """
     if isinstance(x, str):
         yield x
     else:

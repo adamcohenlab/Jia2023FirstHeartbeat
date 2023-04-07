@@ -1,25 +1,29 @@
+""" Functions for analyzing traces of fluorescence or voltage.
+"""
+import os
 from pathlib import Path
-from typing import Union, Tuple, List, Optional, Dict, Any
+from typing import Union, Iterable, Tuple, Collection
 from numpy import typing as npt
-from numpy.core.numeric import cross
+
 import pandas as pd
 import numpy as np
-from scipy import stats, optimize, signal, interpolate
-import scipy.ndimage as ndi
-import skimage.morphology as morph
+from scipy import stats, optimize, signal, interpolate, ndimage
+from skimage import morphology
+
 import matplotlib.pyplot as plt
-from matplotlib import colors, patches
-from datetime import datetime
-import os
-from ..ui import visualize
-from .. import utils
-from . import stats as sstats
+from matplotlib import colors, patches, axes, figure
+
 from statsmodels.stats.diagnostic import lilliefors
 from sklearn.preprocessing import StandardScaler
 from sklearn import neighbors
-import umap
 import igraph
 import pywt
+
+from datetime import datetime
+from ..ui import visualize
+from .. import utils
+from . import stats as sstats
+
 
 plt.style.use(Path(__file__).parent / "../../config" / "bio_pubs_presentation.mplstyle")
 
@@ -149,7 +153,7 @@ def correct_photobleach(
         if nsamps is None:
             raise ValueError("nsamps required if mode is localmin")
         kernel = np.ones(nsamps)
-        photobleach = morph.erosion(trace, kernel)
+        photobleach = morphology.erosion(trace, kernel)
         photobleach_padded = np.pad(
             photobleach, (nsamps - 1) // 2, mode="mean", stat_length=(nsamps - 1) // 2
         )
@@ -411,9 +415,13 @@ def analyze_peaks(
         if return_full:
             return None, p, t
         return None
-    res = pd.DataFrame(
-        {"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi}
-    ).sort_values("peak_idx").reset_index(drop=True)
+    res = (
+        pd.DataFrame(
+            {"peak_idx": peaks, "prominence": prominences, "fwhm": fwhm, "isi": isi}
+        )
+        .sort_values("peak_idx")
+        .reset_index(drop=True)
+    )
 
     if return_full:
         return res, p, t
@@ -478,7 +486,7 @@ def remove_stim_crosstalk(
         else:
             raise ValueError("Invalid value for parameter side")
     elif method == "medfilter":
-        return ndi.median_filter(trace, size=threshold)
+        return ndimage.median_filter(trace, size=threshold)
     elif method == "peak_detect":
         # Use z-score to avoid mean variation
         zsc = stats.zscore(trace)
@@ -538,13 +546,26 @@ def interpolate_indices(trace, mask):
     return interpolated
 
 
-def get_spike_traces(trace, peak_indices, before, after, normalize_height=True):
-    """Generate spike-triggered traces of a defined length from a long trace and peak indices"""
-    spike_traces = np.ones((len(peak_indices), before + after)) * np.nan
+def get_spike_traces(trace: npt.NDArray[np.floating], 
+                     peak_indices: Collection, 
+                     bounds: Tuple[int, int],
+                     normalize_height: bool = True) -> npt.NDArray[np.floating]:
+    """Generate spike-triggered traces of a defined length from a signal trace and known peak
+    indices
+    
+    Args:
+        trace: Signal trace
+        peak_indices: Indices of peaks in trace
+        bounds: Tuple of (before, after) number of samples to include in spike trace
+        normalize_height: If True, normalize each spike trace to have a maximum of 1
+    Returns:
+        spike_traces: Array of spike-triggered traces
+    """
+    spike_traces = np.ones((len(peak_indices), bounds[0] + bounds[1])) * np.nan
     for pk_idx, pk in enumerate(peak_indices):
-        before_pad_length = max(before - pk, 0)
-        after_pad_length = max(0, pk + after - len(trace))
-        spike_trace = trace[max(0, pk - before) : min(len(trace), pk + after)]
+        before_pad_length = max(bounds[0] - pk, 0)
+        after_pad_length = max(0, pk + bounds[1] - len(trace))
+        spike_trace = trace[max(0, pk - bounds[0]) : min(len(trace), pk + bounds[1])]
         spike_trace = np.concatenate(
             [
                 np.ones(before_pad_length) * np.nan,
@@ -654,9 +675,7 @@ def spike_match_to_kernel(
 
 def analyze_sta(
     trace,
-    peak_indices,
-    before,
-    after,
+    peak_indices, bounds
     f_s=1,
     normalize_height=True,
     fitting_function=first_trough_exp_fit,
@@ -664,17 +683,17 @@ def analyze_sta(
     """Generate spike-triggered average from trace and indices of peaks, as well as associated statistics"""
 
     spike_traces = get_spike_traces(
-        trace, peak_indices, before, after, normalize_height
+        trace, peak_indices, bounds, normalize_height
     )
 
     if len(peak_indices) == 0:
-        sta = np.nan * np.ones(before + after)
-        ststd = np.nan * np.ones(before + after)
+        sta = np.nan * np.ones(bounds[0] + bounds[1])
+        ststd = np.nan * np.ones(bounds[0] + bounds[1])
     else:
         sta = np.nanmean(spike_traces, axis=0)
         ststd = np.nanstd(spike_traces, axis=0)
 
-    sta_stats = fitting_function(spike_traces, before, after, f_s=f_s)
+    sta_stats = fitting_function(spike_traces, bounds[0], bounds[1], f_s=f_s)
     return sta, ststd, sta_stats
 
 
@@ -683,10 +702,8 @@ def masked_peak_statistics(
     mask,
     f_s=1,
     min_peaks=6,
-    sta_stats=False,
     trace=None,
-    sta_before=None,
-    sta_after=None,
+    sta_bounds: Union[Tuple[int, int], None] = None
 ):
     """Generate statistics on a set of detected peaks after masking (e.g. subsetting or throwing out bad data)"""
     if len(df.shape) == 1:
@@ -749,12 +766,12 @@ def masked_peak_statistics(
         }
     )
 
-    if sta_stats:
-        if trace is None or sta_before is None or sta_after is None:
+    if sta_bounds:
+        if trace is None:
             raise Exception(
                 "Trace and duration must be provided for spike triggered average"
             )
-        sta, ststd, sta_stats = analyze_sta(trace, locs, sta_before, sta_after)
+        sta, ststd, sta_stats = analyze_sta(trace, locs, sta_bounds)
     else:
         sta = None
         ststd = None
@@ -1096,7 +1113,6 @@ class TimelapseArrayExperiment:
                     df = analyze_peaks(
                         self.dFF[roi, :],
                         prominence=prominence,
-                        wlen=wlen,
                         f_s=self.f_s,
                         **peak_detect_params
                     )
@@ -1127,18 +1143,20 @@ class TimelapseArrayExperiment:
 
     def get_windowed_peak_stats(
         self,
-        window,
-        prominence=None,
-        height=None,
-        overlap=0.5,
-        isi_stat_min_peaks=7,
-        sta_before=0,
-        sta_after=0,
-        wlen=400,
+        window_size: int,
+        prominence: Union[float, None] = None,
+        height: Union[float, None] = None,
+        overlap: float = 0.5,
+        isi_stat_min_peaks: int = 7,
+        sta_bounds: Union[Tuple[int, int], None] = None
     ):
-        """Get ISI statistics averaged over a moving window"""
-        if not self.peaks_found:
-            raise Exception("Run analyze_peaks first")
+        """Get ISI statistics averaged over a moving window
+        
+        """
+        if self.peaks_data is None:
+            raise AttributeError("peaks_data not defined. Run analyze_peaks() first")
+        if self.dFF is None:
+            raise AttributeError("dFF not defined. Run load_traces() first")
 
         sta_embryos = {}
         ststd_embryos = {}
@@ -1163,24 +1181,23 @@ class TimelapseArrayExperiment:
                 )
 
             peak_data = peak_data[filter_mask]
-
             peak_indices = np.array(peak_data["peak_idx"])
             window_indices = np.arange(
-                0, self.dFF.shape[1] - window, step=int(window - overlap * window)
+                0, self.dFF.shape[1] - window_size, step=int(window_size - overlap * window_size)
             )
 
             sta = np.zeros((len(window_indices), sta_before + sta_after))
             ststd = np.zeros((len(window_indices), sta_before + sta_after))
 
             for wi_idx, wi in enumerate(window_indices):
-                mask = (peak_indices >= wi) * (peak_indices < (wi + window))
+                mask = (peak_indices >= wi) * (peak_indices < (wi + window_size))
                 try:
                     iter(mask)
                 except TypeError:
                     mask = np.array([mask])
 
                 for edge_pair in segment_edges:
-                    if edge_pair[1] >= wi and edge_pair[1] < wi + window:
+                    if edge_pair[1] >= wi and edge_pair[1] < wi + window_size:
                         left_of_segment_edge = np.argwhere(
                             peak_indices - edge_pair[1] < 0
                         ).ravel()
@@ -1218,7 +1235,7 @@ class TimelapseArrayExperiment:
                 roi_spike_stats["roi"] = roi
                 roi_spike_stats["mean_freq"] = (
                     roi_spike_stats["n_peaks"]
-                    / (window - np.sum(self.missing_data[wi : wi + window]))
+                    / (window_size - np.sum(self.missing_data[wi : wi + window_size]))
                     * self.f_s
                 )
 
@@ -1256,32 +1273,61 @@ class TimelapseArrayExperiment:
 
         return fig1, [ax1, ax2]
 
-    def plot_spikes(self, rois=None, n_cols=1, figsize=(12, 4), time="s"):
-        """Plot spikes found using find_peaks on DF/F"""
+    def plot_spikes(
+        self,
+        rois: Union[int, Iterable, None] = None,
+        n_cols: int = 1,
+        figsize: Tuple[int, int] = (12, 4),
+        time: str = "s",
+        x_lim: Union[Tuple[float, float], None] = None,
+    ) -> Tuple[figure.Figure, List[axes.Axes]]:
+        """Plot spikes found using find_peaks on DF/F
+
+        Args:
+            rois: ROI to plot. If None, plot all ROIs
+            n_cols: Number of columns in the figure
+            figsize: Size of the figure
+            time: Time unit to use for the x-axis
+            x_lim: Optional limits of the x-axis
+        Returns:
+            Figure and axes objects
+
+        Raises:
+            AttributeError: If no DF/F data has been loaded. Run load_traces() first.
+            AttributeError: If no peaks have been found. Run analyze_peaks() first.
+
+        """
+        if self.dFF is None:
+            raise AttributeError("No DF/F data. Run load_traces() first")
+        if self.peaks_data is None:
+            raise AttributeError("No peaks found. Run analyze_peaks() first")
         if rois is None:
             rois = np.arange(self.n_rois)
-        elif isinstance(rois, int):
-            rois = [rois]
+        else:
+            rois = list(utils.make_iterable(rois))
 
         n_rows = int(np.ceil(len(rois) / n_cols))
-        fig1, axes = plt.subplots(
+        fig1, axs = plt.subplots(
             n_rows, n_cols, figsize=(figsize[0], figsize[1] * n_rows), squeeze=False
         )
-        axes = axes.ravel()
+        axs = list(np.array(axs).ravel())
         t, _ = self._get_time(time)
 
-        for idx, ax in enumerate(axes):
+        for idx, ax in enumerate(axs):
             roi = rois[idx]
             roi_peaks = self.peaks_data.loc[roi]
             peak_indices = roi_peaks["peak_idx"]
 
             ax.plot(t, self.dFF[roi, :])
             ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
-            ax.set_xlabel("Time (%s)" % time)
             ax.set_ylabel(r"$\Delta F/F$")
-            ax.set_title("ROI %d" % roi)
+            ax.set_title(f"ROI {roi}")
+            if x_lim:
+                ax.set_xlim(x_lim)
+        
+        axs[-1].set_xlabel(f"Time ({time})")
         plt.tight_layout()
-        return fig1, axes
+        return fig1, axs
 
     def plot_spikes_with_mask(
         self, mask, rois=None, figsize=(16, 4), img_size=4, time="s"
@@ -1552,10 +1598,20 @@ class TimelapseArrayExperiment:
         return fig1, axes, spectrograms
 
     def _get_time(self, time):
-        """Returns t, timeseries_start
+        """Returns time in hpf or seconds as well as start of each timeblock
 
-        Returns time in hpf or seconds as well as start of each timeblock
+        Args:
+            time: "hpf" or "s"
+        Returns:
+            t: time in hpf or seconds
+            timeseries_start (float): start of each timeblock
+        Raises:
+            ValueError: if time is not set
+            ValueError: if time is not "hpf" or "s"
+
         """
+        if self.t is None:
+            raise ValueError("Time not set")
         if time == "s":
             t = self.t
             timeseries_start = self.block_metadata["offset"]
@@ -1563,7 +1619,7 @@ class TimelapseArrayExperiment:
             t = self.t / 3600 + self.start_hpf
             timeseries_start = self.block_metadata["hpf"]
         else:
-            raise Exception("Invalid time unit")
+            raise ValueError("Invalid time unit")
         return t, timeseries_start
 
     def _find_segment_edges(self):

@@ -384,6 +384,7 @@ def plot_pca_data(
     gc: Union[npt.NDArray, Tuple[int, int]],
     n_components: int = 5,
     pc_title: Union[Callable[..., str], None] = None,
+    mode="temporal"
 ):
     """Show spatial principal components of a video and the corresponding
     temporal trace (dot product).
@@ -396,6 +397,9 @@ def plot_pca_data(
         n_components: number of principal components to display.
         pc_title: function to generate a title for each principal component. If None, the default
             title is used.
+        mode: "temporal" or "spatial". If "temporal", the spatial principal components are
+            displayed as images. If "spatial", the temporal principal components are displayed as
+            traces.
     Returns:
         None
     """
@@ -403,17 +407,27 @@ def plot_pca_data(
 
         def pc_title(j, *args):
             return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
-
-    for i in range(n_components):
-        _, axes = plt.subplots(1, 2, figsize=(12, 6))
-        axes = np.array(axes).ravel()
-        comp = pca.components_[i]
-        cropped_region_image = extract_cropped_region_image(comp, gc)
-        dot_trace = np.matmul(raw_data, comp)
-        axes[0].imshow(cropped_region_image)
-        axes[0].set_title(pc_title(i, comp))
-        axes[1].set_title("PC Value")
-        axes[1].plot(dot_trace)
+    if mode == "temporal":
+        for i in range(n_components):
+            _, axes = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [1, 3]})
+            axes = np.array(axes).ravel()
+            comp = pca.components_[i]
+            cropped_region_image = extract_cropped_region_image(comp, gc)
+            dot_trace = np.matmul(raw_data, comp)
+            axes[0].imshow(cropped_region_image)
+            axes[0].set_title(pc_title(i, comp))
+            axes[1].set_title("PC Value")
+            axes[1].plot(dot_trace)
+    elif mode == "spatial":
+        for i in range(n_components):
+            _, axes = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [3, 1]})
+            axes = np.array(axes).ravel()
+            comp = pca.components_[i]
+            axes[0].plot(comp)
+            axes[0].set_title(pc_title(i, comp))
+            dot_trace = np.matmul(raw_data, comp)
+            cropped_region_image = extract_cropped_region_image(dot_trace, gc)
+            axes[1].imshow(cropped_region_image)
 
 
 def extract_roi_traces(
