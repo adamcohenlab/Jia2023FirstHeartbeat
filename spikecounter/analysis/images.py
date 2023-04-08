@@ -2204,3 +2204,16 @@ def match_snap_to_data(img, ref, scale_factor=4):
     if diff > 0:
         downscaled = downscaled[diff:-diff, diff:-diff]
     return downscaled
+
+def crop_min_shape(im1, im2):
+    min_shape = np.min([im1.shape[:2], im2.shape[:2]], axis=0)
+    
+    diff_shape_im1 = np.array(im1.shape[:2]) - min_shape
+    diff_shape_im2 = np.array(im2.shape[:2]) - min_shape
+    
+    cropped_im1 = im1[diff_shape_im1[0]//2:diff_shape_im1[0]//2+min_shape[0],
+                           diff_shape_im1[1]//2:diff_shape_im1[1]//2+min_shape[1]]
+    cropped_im2 = im2[diff_shape_im2[0]//2:diff_shape_im2[0]//2+min_shape[0],
+                            diff_shape_im2[1]//2:diff_shape_im2[1]//2+min_shape[1]]
+    
+    return cropped_im1, cropped_im2
