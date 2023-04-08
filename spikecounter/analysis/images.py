@@ -4,7 +4,7 @@
 from pathlib import Path
 from os import PathLike
 import os
-from typing import Tuple, Union, Callable, TypeVar, Any, List
+from typing import Tuple, Union, Callable, TypeVar, Any, List, Dict, Collection, Optional
 import pickle
 import warnings
 
@@ -15,7 +15,7 @@ from scipy import signal, stats, interpolate, optimize, ndimage
 from scipy.fft import fft, fftfreq
 
 import matplotlib.pyplot as plt
-from matplotlib import axes
+from matplotlib import axes, figure
 
 import skimage.io as skio
 from skimage import (
@@ -65,7 +65,7 @@ def regress_video(
 
 
 def load_dmd_target(
-    root_dir: Union[str, PathLike[Any]], expt_name: str, downsample_factor: float = 1
+    root_dir: Union[str, PathLike[Any]], expt_name: str, downsample_factor: int = 1
 ) -> npt.NDArray[np.bool_]:
     """Load the DMD target image from the experiment metadata.
     This is the image that the DMD is trying to project onto the screen.
@@ -150,7 +150,7 @@ def load_image(
     expt_name: str,
     subfolder: str = "",
     raw: bool = True,
-):
+) -> Tuple[Union[npt.NDArray, List[npt.NDArray]], Optional[Dict[str, Any]]]:
     """General image loading function that handles various file formats floating around in
     Cohen lab.
 
@@ -206,7 +206,7 @@ def load_image(
             imgs[i] = img[:last_tidx]
 
     if len(imgs) == 1:
-        imgs = imgs[0]
+        return imgs[0], expt_metadata
     return imgs, expt_metadata
 
 
@@ -383,9 +383,9 @@ def plot_pca_data(
     raw_data: npt.NDArray,
     gc: Union[npt.NDArray, Tuple[int, int]],
     n_components: int = 5,
-    pc_title: Union[Callable[..., str], None] = None,
+    pc_title: Optional[Callable[..., str]] = None,
     mode="temporal"
-):
+) -> Tuple[figure.Figure, Collection[axes.Axes]]:
     """Show spatial principal components of a video and the corresponding
     temporal trace (dot product).
 
@@ -402,33 +402,37 @@ def plot_pca_data(
             traces.
     Returns:
         None
+    Raises:
+        ValueError: if mode is not "temporal" or "spatial"
     """
     if pc_title is None:
-
-        def pc_title(j, *args):
+        def pct(j, *args):
             return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
+        pc_title = pct
     if mode == "temporal":
         for i in range(n_components):
-            _, axes = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [1, 3]})
-            axes = np.array(axes).ravel()
+            fig1, axs = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [1, 3]})
+            axs = np.array(axs).ravel()
             comp = pca.components_[i]
             cropped_region_image = extract_cropped_region_image(comp, gc)
             dot_trace = np.matmul(raw_data, comp)
-            axes[0].imshow(cropped_region_image)
-            axes[0].set_title(pc_title(i, comp))
-            axes[1].set_title("PC Value")
-            axes[1].plot(dot_trace)
+            axs[0].imshow(cropped_region_image)
+            axs[0].set_title(pc_title(i, comp))
+            axs[1].set_title("PC Value")
+            axs[1].plot(dot_trace)
     elif mode == "spatial":
         for i in range(n_components):
-            _, axes = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [3, 1]})
-            axes = np.array(axes).ravel()
+            fig1, axs = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [3, 1]})
+            axs = np.array(axs).ravel()
             comp = pca.components_[i]
-            axes[0].plot(comp)
-            axes[0].set_title(pc_title(i, comp))
+            axs[0].plot(comp)
+            axs[0].set_title(pc_title(i, comp))
             dot_trace = np.matmul(raw_data, comp)
             cropped_region_image = extract_cropped_region_image(dot_trace, gc)
-            axes[1].imshow(cropped_region_image)
-
+            axs[1].imshow(cropped_region_image)
+    else:
+        raise ValueError("mode must be 'temporal' or 'spatial'")
+    return fig1, axs
 
 def extract_roi_traces(
     img: npt.NDArray, label_mask: npt.NDArray[np.unsignedinteger]
@@ -450,7 +454,7 @@ def extract_roi_traces(
 
 
 def extract_mask_trace(
-    img: npt.NDArray, mask: Union[npt.NDArray[np.bool_], None] = None
+    img: npt.NDArray, mask: Optional[npt.NDArray[np.bool_]] = None
 ) -> npt.NDArray:
     """Average part of an image to a trace according to a binary mask.
 
@@ -463,7 +467,7 @@ def extract_mask_trace(
     if mask is None:
         trace = img.mean(axis=(1, 2))
     elif len(mask.shape) == 3:
-        masked_img = np.ma.masked_array(img, mask=~mask)
+        masked_img: npt.NDArray = np.ma.masked_array(img, mask=~mask)
         trace = masked_img.mean(axis=(1, 2))
     else:
         # img is 2D, mask is 1D
@@ -594,7 +598,7 @@ def spline_fit_single_trace(
     plot: bool = False,
     n_iterations: int = 100,
     eps: float = 0.01,
-    ax1: Union[axes.Axes, None] = None,
+    ax1: Optional[axes.Axes] = None,
 ) -> Union[
     Tuple[npt.NDArray[np.floating], interpolate.BSpline],
     Tuple[npt.NDArray[np.floating], interpolate.BSpline, axes.Axes],
@@ -742,100 +746,160 @@ def spline_timing(
 
 
 def process_isochrones(
-    beta,
-    dt,
-    threshold=None,
-    plot=False,
-    intensity_mask=None,
-    threshold_mode="amplitude",
-    med_filt_size=3,
-    opening_size=3,
-    closing_size=3,
-    amplitude_artifact_cutoff=2.5,
-    dilation_size=0,
-    valid_mask=None,
-):
-    """Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude values"""
+    beta: npt.NDArray[np.floating],
+    dt: float,
+    threshold: Optional[float] = None,
+    plot: bool = False,
+    intensity_mask: Optional[npt.NDArray[np.bool_]] = None,
+    threshold_mode: str = "amplitude",
+    med_filt_size: int = 3,
+    opening_size: int = 3,
+    closing_size: int = 3,
+    amplitude_artifact_cutoff: float = 2.5,
+    dilation_size: int = 0,
+    valid_mask: Optional[npt.NDArray[np.bool_]]=None,
+) -> Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+    """Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude
+    values
+    
+    Args:
+        beta : 3D array of fit parameters (6 x y x z): absolute height, half-maximum time, 
+            relative amplitude, residual, time of maximum dx/dt, temporal noise
+        dt : time between frames
+        threshold : threshold for spike amplitude to determine acceptable pixels. If None,
+            threshold is determined automatically.
+        plot : whether to plot the results
+        intensity_mask : Optional mask of pixels with sufficient raw intensity.
+        threshold_mode : "amplitude" or "snr"
+        med_filt_size : size of median filter to apply to isochrones.
+        opening_size : size of opening filter to apply to mask.
+        closing_size : size of closing filter to apply to mask.
+        amplitude_artifact_cutoff : max amplitude cutoff.
+        dilation_size : size of dilation filter to apply to mask.
+        valid_mask : Optional manual mask of acceptable pixels.
+    Returns:
+        hm_smoothed: 3D array of smoothed half-maximum times (y x z) in milliseconds
+        dv_smoothed: 3D array of smoothed activation times based on max temporal derivative in 
+            milliseconds
+    Raises:
+        ValueError: if threshold_mode is invalid
+    """
 
     if threshold_mode == "amplitude":
         amplitude = beta[2, :, :]
-    elif threshold_mode == "snr":
+    elif threshold_mode == "snr": # calculate SNR (power)
         amplitude = (np.abs(beta[2] - 1) / beta[5]) ** 2
-    if valid_mask is None:
-        amplitude_nanr = np.copy(amplitude)
+    else:
+        raise ValueError("Invalid threshold_mode")    
+    isochron_mask: npt.NDArray[np.bool_]
+    if valid_mask is None: # if no valid_mask is provided, calculate it automatically
+        amplitude_nanr: npt.NDArray[np.floating] = np.copy(amplitude)
+        # Remove outlier values and NaNs
         amplitude_nanr[beta[2] > amplitude_artifact_cutoff] = np.nan
-        minval = np.nanmin(amplitude)
-        amplitude_nanr[np.isnan(amplitude_nanr)] = minval
-        # thresh = (np.percentile(amplitude_nanr,90)-1)*pct_threshold/100+1
-        amplitude_nanr = ndimage.gaussian_filter(amplitude_nanr, sigma=3)
+        amplitude_nanr[np.isnan(amplitude_nanr)] = np.nanmin(amplitude)
+        amplitude_nanr = ndimage.gaussian_filter(amplitude_nanr, sigma=3).astype(float)
         if threshold is None:
+            # If not provided, determine threshold automatically
             threshold = min(max(filters.threshold_triangle(amplitude_nanr), 2), 100)
         if intensity_mask is None:
+            # If not provided, do not apply intensity mask
             intensity_mask = np.ones_like(amplitude, dtype=bool)
-        # print(threshold)
-        # thresh = filters.threshold_otsu(amplitude_nanr)
-        mask = (amplitude_nanr > threshold) & intensity_mask
-        if plot:
-            fig1, ax1 = plt.subplots(figsize=(3, 3))
-            visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax=ax1)
-        if opening_size > 0:
-            mask = morphology.binary_opening(mask, selem=morphology.disk(opening_size))
-        if closing_size > 0:
-            mask = morphology.binary_closing(mask, selem=morphology.disk(closing_size))
 
+        mask = (amplitude_nanr > threshold) & intensity_mask
+        if opening_size > 0:
+            mask = morphology.binary_opening(mask, footprint=morphology.disk(opening_size))
+        if closing_size > 0:
+            mask = morphology.binary_closing(mask, footprint=morphology.disk(closing_size))
+
+
+        # Find the largest connected component
         labels = measure.label(mask)
         label_values, counts = np.unique(labels, return_counts=True)
         label_values = label_values[1:]
         counts = counts[1:]
         try:
-            valid_mask = labels == label_values[np.argmax(counts)]
+            isochron_mask = labels == label_values[np.argmax(counts)]
             if dilation_size > 0:
-                valid_mask = morphology.binary_dilation(
-                    valid_mask, selem=morphology.disk(dilation_size)
+                isochron_mask = morphology.binary_dilation(
+                    isochron_mask, footprint=morphology.disk(dilation_size)
                 )
-        except Exception as e:
-            valid_mask = np.zeros_like(amplitude, dtype=bool)
+        except ValueError:
+            isochron_mask = np.zeros_like(amplitude, dtype=bool)
 
         if plot:
-            fig1, ax1 = plt.subplots(figsize=(3, 3))
+            _, ax1 = plt.subplots(figsize=(3, 3))
             visualize.display_roi_overlay(amplitude_nanr, mask.astype(int), ax=ax1)
+    else:
+        isochron_mask = valid_mask
 
     hm = beta[1, :, :]
     dv = beta[4, :, :]
-
+    # Replace NaNs with the mean of valid surrounding pixels
     hm_nans_removed = remove_nans(hm, kernel_size=13)
     dv_nans_removed = remove_nans(dv, kernel_size=13)
-
-    hm_smoothed = ndimage.median_filter(hm_nans_removed, size=med_filt_size)
-    hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1)
-    hm_smoothed[~valid_mask] = np.nan
+    # Smooth the isochrones
+    hm_smoothed: npt.NDArray[np.floating] = ndimage.median_filter(hm_nans_removed, 
+                                    size=med_filt_size).astype(float)
+    hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1).astype(float)
+    hm_smoothed[~isochron_mask] = np.nan
     hm_smoothed *= dt * 1000
 
-    dv_smoothed = ndimage.median_filter(dv_nans_removed, size=med_filt_size)
-    dv_smoothed = ndimage.gaussian_filter(dv_smoothed, sigma=1)
-    dv_smoothed[~valid_mask] = np.nan
+    dv_smoothed: npt.NDArray[np.floating] = ndimage.median_filter(dv_nans_removed,
+                                    size=med_filt_size).astype(float)
+    dv_smoothed = ndimage.gaussian_filter(dv_smoothed, sigma=1).astype(float)
+    dv_smoothed[~isochron_mask] = np.nan
     dv_smoothed *= dt * 1000
 
     return hm_smoothed, dv_smoothed
 
 
-def clamp_intensity(img, pctiles=[2, 99]):
-    min_val, max_val = np.nanpercentile(img, pctiles)
+def clamp_intensity(img: npt.NDArray[np.floating], 
+        pctiles: Tuple[float, float] = (2.0, 99.0)) -> npt.NDArray[np.floating]:
+    """
+    Args:
+        img: 2D image
+        pctiles: Percentiles to use for clamping
+    Returns:
+        processed_img: 2D image with values clamped to the given percentiles
+    """
+    min_val, max_val = np.nanpercentile(img, [*pctiles])
     processed_img = np.copy(img)
     processed_img[processed_img > max_val] = max_val
     processed_img[processed_img < min_val] = min_val
     return processed_img
 
 
-def normalize_and_clamp(img, pctile=99):
-    processed_img = img / np.nanpercentile(img, pctile)
+def normalize_and_clamp(img: npt.NDArray[np.floating], 
+        pctiles: tuple[Optional[float], float] = (None, 99)) -> npt.NDArray[np.floating]:
+    """ Normalize an image and clamp values to the given percentiles
+
+    Args:
+        img: 2D image
+        pctiles: Percentiles to use for clamping. If the first value is None, the minimum value is
+            set to 0.
+    Returns:
+        processed_img: 2D image with values clamped to the given percentiles
+    """
+    if pctiles[0] is None:
+        min_val = 0
+        max_val = np.nanpercentile(img, pctiles[1])
+    else:
+        min_val, max_val = np.nanpercentile(img, [*pctiles])
+    processed_img = (img - min_val) / (max_val - min_val)
     processed_img[processed_img > 1] = 1
     processed_img[processed_img < 0] = 0
     return processed_img
 
 
-def remove_nans(img, kernel_size=3):
-    """Replace NaNs in a 2D image with an average of surrounding values"""
+def remove_nans(img: npt.NDArray[np.floating], kernel_size: int = 3) -> npt.NDArray[np.floating]:
+    """Replace NaNs in a 2D image with an average of surrounding values
+    
+    Args:
+        img: 2D image
+        kernel_size: Size of the kernel to use for averaging
+    Returns:
+        nans_removed: 2D image with NaNs replaced
+    """
     convinput = np.copy(img)
     convinput[np.isnan(img)] = 0
     kernel = np.ones((kernel_size, kernel_size)) / (kernel_size**2 - 1)
@@ -846,29 +910,44 @@ def remove_nans(img, kernel_size=3):
 
 
 def estimate_local_velocity(
-    activation_times,
-    deltax=7,
-    deltay=7,
-    deltat=100,
-    valid_points_threshold=10,
-    debug=False,
-    weights=None,
-):
-    """Use local polynomial fitting strategy from Bayley et al. 1998 to determine velocity from activation map"""
+    activation_times: npt.NDArray[np.floating],
+    deltax: int = 7,
+    deltay: int = 7,
+    deltat: float = 100,
+    valid_points_threshold: int = 10,
+    debug: bool = False,
+    weights: Optional[npt.NDArray[np.floating]] = None,
+) -> Union[Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]],
+            Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
+    """Use local polynomial fitting strategy from Bayley et al. 1998 to determine velocity from
+    activation map
+
+    Args:
+        activation_times: 2D array of activation times
+        deltax: Size of local region in x direction
+        deltay: Size of local region in y direction
+        deltat: Time interval for local region
+        valid_points_threshold: Minimum number of points required to fit a local polynomial
+        debug: Whether to plot the results
+        weights: Optional weights to use for local polynomial fitting
+    Returns:
+        v: 3D array of velocity vectors
+        t_smoothed: 2D array of smoothed activation times
+        n_points_fit: 2D array of number of points used for local polynomial fitting at each pixel    
+    """
     X, Y = np.meshgrid(
         np.arange(activation_times.shape[0]), np.arange(activation_times.shape[1])
     )
     coords = np.array([Y.ravel(), X.ravel()]).T
-    Tsmoothed = np.ones_like(activation_times) * np.nan
+    t_smoothed = np.ones_like(activation_times) * np.nan
     residuals = np.ones_like(activation_times) * np.nan
     # Note v = (v_y, v_x), consistent with row and column convention
     v = np.ones((2, activation_times.shape[0], activation_times.shape[1])) * np.nan
     n_points_fit = np.zeros_like(activation_times)
 
     for y, x in coords:
-        # if np.isnan(activation_times[y, x]):
-        #     continue
-        local_X, local_Y = (
+        # Generate local coordinates
+        local_x, local_y = (
             np.meshgrid(
                 np.arange(
                     max(0, x - deltax), min(activation_times.shape[1], x + deltax + 1)
@@ -879,22 +958,27 @@ def estimate_local_velocity(
             )
             - np.array([x, y])[:, np.newaxis, np.newaxis]
         )
+        # Generate local activation times
         local_times = activation_times[
             max(0, y - deltay) : min(activation_times.shape[0], y + deltay + 1),
             max(0, x - deltax) : min(activation_times.shape[1], x + deltax + 1),
         ]
-        local_X = local_X.ravel()
-        local_Y = local_Y.ravel()
+        local_x = local_x.ravel()
+        local_y = local_y.ravel()
+        b = local_times.ravel()
+
+        # Generate local design matrix
         A = np.array(
             [
-                local_X**2,
-                local_Y**2,
-                local_X * local_Y,
-                local_X,
-                local_Y,
-                np.ones_like(local_X),
+                local_x**2,
+                local_y**2,
+                local_x * local_y,
+                local_x,
+                local_y,
+                np.ones_like(local_x),
             ]
         ).T
+        # Apply optional weights
         if weights is None:
             w = np.ones((A.shape[0], 1))
         else:
@@ -902,31 +986,33 @@ def estimate_local_velocity(
                 max(0, y - deltay) : min(activation_times.shape[0], y + deltay + 1),
                 max(0, x - deltax) : min(activation_times.shape[1], x + deltax + 1),
             ].ravel()[:, None]
-        b = local_times.ravel()
+        # Remove NaNs
         w = w[~np.isnan(b), :]
         A = A[~np.isnan(b), :]
         b = b[~np.isnan(b)]
+        # Remove points outside of time window
         mask = np.abs(b - activation_times[y, x]) < deltat
-        # print(w.shape, A.shape, b.shape)
         w = w[mask, :]
         A = A[mask, :] * np.sqrt(w)
         b = b[mask] * np.sqrt(w).ravel()
-        # print(w.shape, A.shape, b.shape)
+        
+        # Check if there are enough points to fit
         n_points_fit[y, x] = len(b)
         if n_points_fit[y, x] < valid_points_threshold:
             continue
         try:
+            # Fit polynomial of degree 2 to coordinates and activation times
             p, res, _, _ = np.linalg.lstsq(A, b)
-            Tsmoothed[y, x] = p[5]
+            t_smoothed[y, x] = p[5]
             residuals[y, x] = res
             # To make v = (v_y, v_x, flip)
             v[:, y, x] = np.flip(p[3:5] / (p[3] ** 2 + p[4] ** 2))
-        except Exception as e:
+        except (np.linalg.LinAlgError, ValueError):
             pass
     if debug:
-        return v, Tsmoothed, n_points_fit
+        return v, t_smoothed, n_points_fit
     else:
-        return v, Tsmoothed
+        return v, t_smoothed
 
 
 def correct_photobleach(
@@ -2187,8 +2273,14 @@ def split_embryos(
     return embryo_images, rotated_props, rotated_regions, processed_extra_arrays
 
 
-def translate_image(img, shift):
-    """Translate an image by a shift (x,y)"""
+def translate_image(img: npt.NDArray, shift: Tuple[float, float]) -> npt.NDArray:
+    """Translate an image by a shift (x,y)
+    Args:
+        img: Image to translate
+        shift: Tuple of (x,y) shift
+    Returns:
+        Translated image
+    """
     u, v = shift
     nr, nc = img.shape
     row_coords, col_coords = np.meshgrid(np.arange(nr), np.arange(nc), indexing="ij")
@@ -2197,23 +2289,37 @@ def translate_image(img, shift):
     )
 
 
-def match_snap_to_data(img, ref, scale_factor=4):
-    """Match a snap of arbitrary size to an equally sized or smaller reference data set, assuming both ROIs are centered in camera coordinates"""
-    downscaled = transform.downscale_local_mean(img, (scale_factor, scale_factor))
-    diff = (downscaled.shape[0] - ref.shape[0]) // 2
-    if diff > 0:
-        downscaled = downscaled[diff:-diff, diff:-diff]
-    return downscaled
-
-def crop_min_shape(im1, im2):
-    min_shape = np.min([im1.shape[:2], im2.shape[:2]], axis=0)
+def match_snap_to_data(img: npt.NDArray, ref: npt.NDArray, scale_factor: float = 4) -> npt.NDArray:
+    """Match a snap of arbitrary size to an equally sized or smaller reference data set, assuming
+    both ROIs are centered in camera coordinates
     
+    Args:
+        img: Image to match
+        ref: Reference image to match to
+        scale_factor: Factor to downscale the image by before matching
+    Returns:
+        Cropped image
+
+    """
+    downscaled = transform.downscale_local_mean(img, (scale_factor, scale_factor))
+    cropped, _ = crop_min_shape(downscaled, ref)
+    return cropped
+
+def crop_min_shape(im1: npt.NDArray, im2: npt.NDArray) -> Tuple[npt.NDArray, npt.NDArray]:
+    """ Crops two images to the minimum shape of the two, assuming the images are centered 
+    in the camera coordinates
+
+    Args:
+        im1: First image to crop
+        im2: Second image to crop
+    Returns:
+        Cropped images
+    """
+    min_shape = np.min([im1.shape[:2], im2.shape[:2]], axis=0)
     diff_shape_im1 = np.array(im1.shape[:2]) - min_shape
     diff_shape_im2 = np.array(im2.shape[:2]) - min_shape
-    
     cropped_im1 = im1[diff_shape_im1[0]//2:diff_shape_im1[0]//2+min_shape[0],
                            diff_shape_im1[1]//2:diff_shape_im1[1]//2+min_shape[1]]
     cropped_im2 = im2[diff_shape_im2[0]//2:diff_shape_im2[0]//2+min_shape[0],
                             diff_shape_im2[1]//2:diff_shape_im2[1]//2+min_shape[1]]
-    
     return cropped_im1, cropped_im2

@@ -2,7 +2,7 @@
 """
 import os
 from pathlib import Path
-from typing import Union, Iterable, Tuple, Collection, Dict
+from typing import Union, Iterable, Tuple, Collection, Dict, Optional
 from numpy import typing as npt
 
 import pandas as pd
@@ -134,12 +134,12 @@ def plot_trace_with_stim_bars(
 
 
 def correct_photobleach(
-    trace,
-    method="linear",
-    nsamps=None,
-    plot=False,
-    return_params=False,
-    invert=False,
+    trace: npt.NDArray[np.floating],
+    method: str = "linear",
+    nsamps: Optional[int] = None,
+    plot: bool = False,
+    return_params: bool  = False,
+    invert: bool = False,
     **cost_function_params
 ):
     """Correct trace for photobleaching"""
