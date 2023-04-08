@@ -1028,11 +1028,11 @@ def correct_photobleach(
     """Perform photobleach correction on each pixel in an image"""
     if method == "linear":
         # Perform linear fit to each pixel independently over time
-        corrected_img = np.zeros_like(img)
-        for y in range(img.shape[1]):
-            for x in range(img.shape[2]):
-                corrected_trace, _ = traces.correct_photobleach(img[:, y, x])
-                corrected_img[:, y, x] = corrected_trace
+        pixel_traces = img.reshape(img.shape[0], -1)
+        A = np.array([np.arange(img.shape[0]), np.ones(img.shape[0])]).T
+        x = np.linalg.pinv(A) @ pixel_traces
+        regressed_traces = pixel_traces - x[0] * np.arange(img.shape[0])[:, np.newaxis]
+        corrected_img = regressed_traces.reshape(img.shape)
 
     elif method == "localmin":
         #
