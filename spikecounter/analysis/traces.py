@@ -592,8 +592,7 @@ def align_fixed_offset(traces, offsets):
 def get_sta(
     trace,
     peak_indices,
-    before,
-    after,
+    bounds,
     f_s=1,
     normalize_height=True,
     return_std=False,
@@ -601,7 +600,7 @@ def get_sta(
 ):
     """Generate spike-triggered average from given reference indices (peaks or stimuli)"""
     spike_traces = get_spike_traces(
-        trace, peak_indices, before, after, normalize_height
+        trace, peak_indices, bounds, normalize_height
     )
 
     if len(peak_indices) == 0:

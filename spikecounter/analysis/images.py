@@ -1055,8 +1055,9 @@ def get_image_dFF(img, baseline_percentile=10, t_range=(0, -1)):
     return dFF
 
 
-def get_spike_videos(img, peak_indices, before, after, normalize_height=True):
+def get_spike_videos(img, peak_indices, bounds, normalize_height=True):
     """Generate spike-triggered videos of a defined length from a long video and peak indices"""
+    before, after = bounds
     spike_imgs = (
         np.ones((len(peak_indices), before + after, img.shape[1], img.shape[2]))
         * np.nan
@@ -1086,8 +1087,7 @@ def get_spike_videos(img, peak_indices, before, after, normalize_height=True):
 def spike_triggered_average_video(
     img,
     peak_indices,
-    before,
-    after,
+    sta_bounds,
     include_mask=None,
     normalize_height=False,
     full_output=False,
@@ -1098,8 +1098,7 @@ def spike_triggered_average_video(
     spike_triggered_images = get_spike_videos(
         img,
         peak_indices[include_mask],
-        before,
-        after,
+        sta_bounds,
         normalize_height=normalize_height,
     )
     sta = np.nanmean(spike_triggered_images, axis=0)
@@ -1337,7 +1336,7 @@ def image_to_sta(
         mask = mean_img > np.percentile(mean_img, 80)
         kernel_size = int(mask.shape[0] / 50)
         mask = morphology.binary_closing(
-            mask, selem=np.ones((kernel_size, kernel_size))
+            mask, footprint=np.ones((kernel_size, kernel_size))
         )
     _ = visualize.display_roi_overlay(mean_img, mask.astype(int), ax=axes[0])
 
@@ -1415,25 +1414,24 @@ def image_to_sta(
                 mean_trace[[pks[-1] - b1, pks[-1], pks[-1] + b2]],
                 "rx",
             )
-    else:
-        b1, b2 = sta_bounds
+        sta_bounds = (b1,b2)
 
     # Collect spike traces according to bounds
     sta_trace = traces.get_sta(
-        dFF_mean, pks, b1, b2, f_s=fs, normalize_height=normalize_height
+        dFF_mean, pks, sta_bounds, f_s=fs, normalize_height=normalize_height
     )
 
     # Get STA video
 
     sta, spike_images = spike_triggered_average_video(
-        dFF_img, pks, b1, b2, normalize_height=normalize_height, full_output=full_output
+        dFF_img, pks, sta_bounds, normalize_height=normalize_height, full_output=full_output
     )
 
     if plot:
-        axes[2].plot(np.arange(b1 + b2) / fs, sta_trace)
+        axes[2].plot((np.arange(sta_bounds[0] + sta_bounds[1]) - sta_bounds[0]) / fs, sta_trace)
         axes[2].set_xlabel("Time (s)")
         axes[2].set_ylabel(r"$F/F_0$")
-        axes[2].set_title("STA taps: %d + %d" % (b1, b2))
+        axes[2].set_title("STA taps: %d + %d" % (sta_bounds[0], sta_bounds[1]))
         plt.tight_layout()
     if savedir:
         skio.imsave(os.path.join(savedir, "sta.tif"), sta)
