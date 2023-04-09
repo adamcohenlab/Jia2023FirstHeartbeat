@@ -1389,7 +1389,7 @@ class TimelapseArrayExperiment:
         axes[3].set_xlabel("Time (%s)" % time)
         axes[3].set_ylabel("F")
 
-        roi_it = utils.convert_to_iterable(rois)
+        roi_it = utils.make_iterable(rois)
         for idx, roi in enumerate(roi_it):
             roi_peaks = self.peaks_data.loc[roi]
             peak_indices = roi_peaks["peak_idx"]
@@ -1449,7 +1449,7 @@ class TimelapseArrayExperiment:
         axes[2].set_xlabel("Frequency (Hz)")
         axes[2].set_ylabel(r"$S_{xx}(f)$")
         axes[2].set_title("Periodogram")
-        roi_it = utils.convert_to_iterable(rois)
+        roi_it = utils.make_iterable(rois)
         for _, roi in enumerate(roi_it):
             raw = self.raw[roi, tidx_min:tidx_max]
             axes[0].plot(self.t[tidx_min:tidx_max], raw)
@@ -1462,7 +1462,7 @@ class TimelapseArrayExperiment:
 
     def plot_spike_width_stats(self, rois, figsize=(12, 6), time="hpf"):
         """Plot spike width against developmental time and interspike interval"""
-        roi_it = utils.convert_to_iterable(rois)
+        roi_it = utils.make_iterable(rois)
 
         fig1, axes = plt.subplots(1, 2, figsize=figsize)
         axes = axes.ravel()
@@ -1489,7 +1489,7 @@ class TimelapseArrayExperiment:
 
     def plot_isi_ks(self, rois, cutoff_times, figsize=(12, 12), time="hpf"):
         """Plot interspike interval Kolmogorov-Smirnov test"""
-        roi_it = utils.convert_to_iterable(rois)
+        roi_it = utils.make_iterable(rois)
         fig1, ax1 = plt.subplots(figsize=figsize)
 
         for _, roi in enumerate(roi_it):
@@ -1514,7 +1514,7 @@ class TimelapseArrayExperiment:
 
     def plot_isi_histograms(self, rois, cutoff_times, figsize=(6, 6), time="hpf"):
         """Plot interspike interval histograms"""
-        roi_it = utils.convert_to_iterable(rois)
+        roi_it = utils.make_iterable(rois)
         roi_it = list(roi_it)
         if len(cutoff_times) != len(roi_it):
             raise ValueError(
@@ -1557,7 +1557,7 @@ class TimelapseArrayExperiment:
         time="hpf",
     ):
         """Plot spectrograms for each embryo"""
-        roi_it = utils.convert_to_iterable(rois)
+        roi_it = utils.make_iterable(rois)
         roi_it = list(roi_it)
         spectrograms = []
         fig1, axes = visualize.tile_plots_conditions(roi_it, figsize)

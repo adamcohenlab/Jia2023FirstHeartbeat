@@ -4,7 +4,7 @@
 from pathlib import Path
 from os import PathLike
 import os
-from typing import Tuple, Union, Callable, TypeVar, Any, List, Dict, Collection, Optional
+from typing import Tuple, Union, Callable, TypeVar, Any, List, Dict, Collection, Optional, Iterable
 import pickle
 import warnings
 
@@ -150,6 +150,8 @@ def load_image(
     expt_name: str,
     subfolder: str = "",
     raw: bool = True,
+    cam_indices: Optional[Union[int, Iterable[int]]] = None,
+    expt_metadata: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Union[npt.NDArray, List[npt.NDArray]], Optional[Dict[str, Any]]]:
     """General image loading function that handles various file formats floating around in
     Cohen lab.
@@ -163,19 +165,26 @@ def load_image(
         subfolder: subfolder of the experiment (different stages of processing).
         raw: if True, will try to load the raw data from the .bin file.  Otherwise, will try
             to load the tif files.
+        cam_indices: if there are multiple cameras, this is the index of the camera to load.
+        expt_metadata: if the metadata has already been loaded, pass it in here
     Returns:
         Image data.  If there is only one camera, this will be a 3D array (time, x, y).  If there
             are multiple cameras, this will be a list of 3D arrays.
     """
     data_dir = Path(rootdir, subfolder)
     # Load the .mat file containing the metadata
-    expt_metadata = utils.load_experiment_metadata(rootdir, expt_name)
+    if expt_metadata is None:
+        expt_metadata = utils.load_experiment_metadata(rootdir, expt_name)
     imgs = []
 
     if (
-        raw and expt_metadata and (data_dir / expt_name).is_dir()
+        raw and expt_metadata and (data_dir / expt_name).is_dir() and subfolder == ""
     ):  # Load binary images for each camera
-        for i in range(len(expt_metadata["cameras"])):
+        if cam_indices is None:
+            cam_indices = range(len(expt_metadata["cameras"]))
+        else:
+            cam_indices = utils.make_iterable(cam_indices)
+        for i in cam_indices:
             width = int(expt_metadata["cameras"][i]["roi"][1])
             height = int(expt_metadata["cameras"][i]["roi"][3])
             imgs.append(

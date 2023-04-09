@@ -4,11 +4,13 @@ Utility functions for spikecounter package
 """
 from pathlib import Path
 import warnings
+import logging
+from logging.handlers import RotatingFileHandler
 import importlib
 import os
 from os import PathLike
 from datetime import datetime
-from typing import Union, List, Tuple, Dict, Any, Callable, Generator
+from typing import Union, Tuple, Dict, Any, Callable, Generator
 
 import numpy as np
 from numpy import typing as npt
@@ -21,6 +23,27 @@ from scipy import interpolate, signal
 import re
 import pandas as pd
 import mat73
+
+def initialize_logging(logging_path: Union[str, PathLike[Any]], capture_warnings: bool = False) -> logging.Logger:
+    """Initialize logging to a file and the console
+
+    Args:
+        logging_path: Path to the log file
+        captureWarnings: Whether to capture warnings
+    """
+    file_handler = RotatingFileHandler(
+        logging_path, mode="w+", maxBytes=int(1e6), backupCount=1
+    )
+    formatter = logging.Formatter("%(asctime)s:%(levelname)s; %(message)s",
+                              "%Y-%m-%d %H:%M:%S")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    logging.captureWarnings(capture_warnings)
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+    return logger
+
 
 
 
@@ -494,14 +517,6 @@ def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5, 95], cmap=No
     interact(
         view_image, z=(0, st.shape[0] - 1), c=["all"] + list(np.arange(st.shape[-1]))
     )
-
-
-def convert_to_iterable(x):
-    try:
-        iterator = iter(x)
-    except TypeError:
-        iterator = iter([x])
-    return iterator
 
 
 def traces_to_dict(matdata):
