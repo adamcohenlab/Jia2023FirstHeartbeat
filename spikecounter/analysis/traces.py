@@ -76,7 +76,7 @@ def find_stim_starts(
     tol: float = 0.9,
 ) -> npt.NDArray[np.floating]:
     """Find the start of a stimulation period based on cross-excitation from blue channel and known
-    expected period.
+    expected period (no explicit stimulation trace).
 
     Args:
         crosstalk_mask: 1D array of boolean values indicating whether a spike was detected.
@@ -98,6 +98,24 @@ def find_stim_starts(
             valid_stims[i] = 1
             curr_stim = rising_ts[i]
     return rising_ts[valid_stims.astype(bool)]
+
+def generate_invalid_frame_indices(stim_trace: npt.NDArray[np.generic]) -> npt.NDArray[np.int64]:
+    """ Generate indices of frames that should be excluded from analysis due to stimulation.
+
+    Args:
+        stim_trace: 1D array of stimulation trace.
+    Returns:
+        invalid_indices_camera: 1D array of indices of frames that should be excluded from analysis.
+    """
+    invalid_indices_daq = np.argwhere(stim_trace > 0).ravel()
+    # If stimulations only last a single frame, then the next frame is also invalid
+    if np.sum(np.diff(invalid_indices_daq) < 2) == 0:
+        invalid_indices_camera = np.unique(
+            np.concatenate((invalid_indices_daq, invalid_indices_daq + 1))
+        )
+    else:
+        invalid_indices_camera = invalid_indices_daq
+    return invalid_indices_camera
 
 
 def plot_trace_with_stim_bars(

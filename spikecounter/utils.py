@@ -5,6 +5,7 @@ Utility functions for spikecounter package
 from pathlib import Path
 import warnings
 import logging
+import argparse
 from logging.handlers import RotatingFileHandler
 import importlib
 import os
@@ -20,9 +21,27 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 from ipywidgets import interact
 from scipy import interpolate, signal
+from scipy import io as scio
 import re
 import pandas as pd
 import mat73
+
+def str2bool(v: str) -> bool:
+    """ convert string to boolean value
+
+    Args:
+        v: string to convert
+    Returns:
+        boolean value
+    """
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "y", "1"):
+        return True
+    elif v.lower() in ("no", "false", "f", "n", "0"):
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Boolean value expected.")
 
 def initialize_logging(logging_path: Union[str, PathLike[Any]], capture_warnings: bool = False) -> logging.Logger:
     """Initialize logging to a file and the console
@@ -173,7 +192,7 @@ def extract_experiment_name(input_path):
     return expt_name
 
 
-def load_experiment_metadata(
+def load_video_metadata(
     root_dir: Union[str, PathLike],
     expt_name: str,
 ) -> Union[Dict[str, Any], None]:
@@ -523,7 +542,10 @@ def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5, 95], cmap=No
     )
 
 
-def traces_to_dict(matdata):
+def traces_to_dict(matdata: Dict[str, Any]) -> Tuple[Dict[str, Any], npt.NDArray[np.floating]]:
+    """ Extract traces from DAQ data, synchronize to camera frames, and return as a dictionary.
+    """
+    # Find daq indices where camera frames were acquired
     rising_edges = np.argwhere(np.diff(matdata["frame_counter"]) == 1).ravel()
     if isinstance(matdata["task_traces"], dict):
         trace_types = [matdata["task_traces"]]
@@ -531,6 +553,7 @@ def traces_to_dict(matdata):
         trace_types = matdata["task_traces"]
     dt_dict = {}
     for trace_type in trace_types:
+        # Extract individual traces
         traces = trace_type["traces"]
         if isinstance(traces["name"], str):
             dt_dict[traces["name"]] = np.zeros_like(rising_edges, dtype=float)

@@ -4,7 +4,18 @@
 from pathlib import Path
 from os import PathLike
 import os
-from typing import Tuple, Union, Callable, TypeVar, Any, List, Dict, Collection, Optional, Iterable
+from typing import (
+    Tuple,
+    Union,
+    Callable,
+    TypeVar,
+    Any,
+    List,
+    Dict,
+    Collection,
+    Optional,
+    Iterable,
+)
 import pickle
 import warnings
 
@@ -41,8 +52,8 @@ from .. import utils
 from ..ui import visualize
 
 MAX_INT32 = np.iinfo(np.int32).max
-T = TypeVar("T", bound=npt.NBitBase)
-
+T = TypeVar("T")
+NPGeneric = TypeVar("NPGeneric", bound=np.generic)
 
 def regress_video(
     img: npt.NDArray, trace_array: npt.NDArray, regress_dc: bool = True
@@ -152,7 +163,10 @@ def load_image(
     raw: bool = True,
     cam_indices: Optional[Union[int, Iterable[int]]] = None,
     expt_metadata: Optional[Dict[str, Any]] = None,
-) -> Tuple[Union[npt.NDArray, List[npt.NDArray]], Optional[Dict[str, Any]]]:
+) -> Tuple[
+    Union[npt.NDArray[np.generic], List[npt.NDArray[np.generic]]],
+    Optional[Dict[str, Any]],
+]:
     """General image loading function that handles various file formats floating around in
     Cohen lab.
 
@@ -174,7 +188,7 @@ def load_image(
     data_dir = Path(rootdir, subfolder)
     # Load the .mat file containing the metadata
     if expt_metadata is None:
-        expt_metadata = utils.load_experiment_metadata(rootdir, expt_name)
+        expt_metadata = utils.load_video_metadata(rootdir, expt_name)
     imgs = []
 
     if (
@@ -213,7 +227,7 @@ def load_image(
                     )
                 )
             imgs[i] = img[:last_tidx]
-
+    # if isinstance(cam_indices
     if len(imgs) == 1:
         return imgs[0], expt_metadata
     return imgs, expt_metadata
@@ -393,7 +407,7 @@ def plot_pca_data(
     gc: Union[npt.NDArray, Tuple[int, int]],
     n_components: int = 5,
     pc_title: Optional[Callable[..., str]] = None,
-    mode="temporal"
+    mode="temporal",
 ) -> Tuple[figure.Figure, Collection[axes.Axes]]:
     """Show spatial principal components of a video and the corresponding
     temporal trace (dot product).
@@ -415,12 +429,16 @@ def plot_pca_data(
         ValueError: if mode is not "temporal" or "spatial"
     """
     if pc_title is None:
+
         def pct(j, *args):
             return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
+
         pc_title = pct
     if mode == "temporal":
         for i in range(n_components):
-            fig1, axs = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [1, 3]})
+            fig1, axs = plt.subplots(
+                1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [1, 3]}
+            )
             axs = np.array(axs).ravel()
             comp = pca.components_[i]
             cropped_region_image = extract_cropped_region_image(comp, gc)
@@ -431,7 +449,9 @@ def plot_pca_data(
             axs[1].plot(dot_trace)
     elif mode == "spatial":
         for i in range(n_components):
-            fig1, axs = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [3, 1]})
+            fig1, axs = plt.subplots(
+                1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [3, 1]}
+            )
             axs = np.array(axs).ravel()
             comp = pca.components_[i]
             axs[0].plot(comp)
@@ -442,6 +462,7 @@ def plot_pca_data(
     else:
         raise ValueError("mode must be 'temporal' or 'spatial'")
     return fig1, axs
+
 
 def extract_roi_traces(
     img: npt.NDArray, label_mask: npt.NDArray[np.unsignedinteger]
@@ -766,13 +787,13 @@ def process_isochrones(
     closing_size: int = 3,
     amplitude_artifact_cutoff: float = 2.5,
     dilation_size: int = 0,
-    valid_mask: Optional[npt.NDArray[np.bool_]]=None,
+    valid_mask: Optional[npt.NDArray[np.bool_]] = None,
 ) -> Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
     """Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude
     values
-    
+
     Args:
-        beta : 3D array of fit parameters (6 x y x z): absolute height, half-maximum time, 
+        beta : 3D array of fit parameters (6 x y x z): absolute height, half-maximum time,
             relative amplitude, residual, time of maximum dx/dt, temporal noise
         dt : time between frames
         threshold : threshold for spike amplitude to determine acceptable pixels. If None,
@@ -788,7 +809,7 @@ def process_isochrones(
         valid_mask : Optional manual mask of acceptable pixels.
     Returns:
         hm_smoothed: 3D array of smoothed half-maximum times (y x z) in milliseconds
-        dv_smoothed: 3D array of smoothed activation times based on max temporal derivative in 
+        dv_smoothed: 3D array of smoothed activation times based on max temporal derivative in
             milliseconds
     Raises:
         ValueError: if threshold_mode is invalid
@@ -796,12 +817,12 @@ def process_isochrones(
 
     if threshold_mode == "amplitude":
         amplitude = beta[2, :, :]
-    elif threshold_mode == "snr": # calculate SNR (power)
+    elif threshold_mode == "snr":  # calculate SNR (power)
         amplitude = (np.abs(beta[2] - 1) / beta[5]) ** 2
     else:
-        raise ValueError("Invalid threshold_mode")    
+        raise ValueError("Invalid threshold_mode")
     isochron_mask: npt.NDArray[np.bool_]
-    if valid_mask is None: # if no valid_mask is provided, calculate it automatically
+    if valid_mask is None:  # if no valid_mask is provided, calculate it automatically
         amplitude_nanr: npt.NDArray[np.floating] = np.copy(amplitude)
         # Remove outlier values and NaNs
         amplitude_nanr[beta[2] > amplitude_artifact_cutoff] = np.nan
@@ -816,10 +837,13 @@ def process_isochrones(
 
         mask = (amplitude_nanr > threshold) & intensity_mask
         if opening_size > 0:
-            mask = morphology.binary_opening(mask, footprint=morphology.disk(opening_size))
+            mask = morphology.binary_opening(
+                mask, footprint=morphology.disk(opening_size)
+            )
         if closing_size > 0:
-            mask = morphology.binary_closing(mask, footprint=morphology.disk(closing_size))
-
+            mask = morphology.binary_closing(
+                mask, footprint=morphology.disk(closing_size)
+            )
 
         # Find the largest connected component
         labels = measure.label(mask)
@@ -847,14 +871,16 @@ def process_isochrones(
     hm_nans_removed = remove_nans(hm, kernel_size=13)
     dv_nans_removed = remove_nans(dv, kernel_size=13)
     # Smooth the isochrones
-    hm_smoothed: npt.NDArray[np.floating] = ndimage.median_filter(hm_nans_removed, 
-                                    size=med_filt_size).astype(float)
+    hm_smoothed: npt.NDArray[np.floating] = ndimage.median_filter(
+        hm_nans_removed, size=med_filt_size
+    ).astype(float)
     hm_smoothed = ndimage.gaussian_filter(hm_smoothed, sigma=1).astype(float)
     hm_smoothed[~isochron_mask] = np.nan
     hm_smoothed *= dt * 1000
 
-    dv_smoothed: npt.NDArray[np.floating] = ndimage.median_filter(dv_nans_removed,
-                                    size=med_filt_size).astype(float)
+    dv_smoothed: npt.NDArray[np.floating] = ndimage.median_filter(
+        dv_nans_removed, size=med_filt_size
+    ).astype(float)
     dv_smoothed = ndimage.gaussian_filter(dv_smoothed, sigma=1).astype(float)
     dv_smoothed[~isochron_mask] = np.nan
     dv_smoothed *= dt * 1000
@@ -862,8 +888,9 @@ def process_isochrones(
     return hm_smoothed, dv_smoothed
 
 
-def clamp_intensity(img: npt.NDArray[np.floating], 
-        pctiles: Tuple[float, float] = (2.0, 99.0)) -> npt.NDArray[np.floating]:
+def clamp_intensity(
+    img: npt.NDArray[np.floating], pctiles: Tuple[float, float] = (2.0, 99.0)
+) -> npt.NDArray[np.floating]:
     """
     Args:
         img: 2D image
@@ -878,9 +905,10 @@ def clamp_intensity(img: npt.NDArray[np.floating],
     return processed_img
 
 
-def normalize_and_clamp(img: npt.NDArray[np.floating], 
-        pctiles: tuple[Optional[float], float] = (None, 99)) -> npt.NDArray[np.floating]:
-    """ Normalize an image and clamp values to the given percentiles
+def normalize_and_clamp(
+    img: npt.NDArray[np.floating], pctiles: tuple[Optional[float], float] = (None, 99)
+) -> npt.NDArray[np.floating]:
+    """Normalize an image and clamp values to the given percentiles
 
     Args:
         img: 2D image
@@ -900,9 +928,11 @@ def normalize_and_clamp(img: npt.NDArray[np.floating],
     return processed_img
 
 
-def remove_nans(img: npt.NDArray[np.floating], kernel_size: int = 3) -> npt.NDArray[np.floating]:
+def remove_nans(
+    img: npt.NDArray[np.floating], kernel_size: int = 3
+) -> npt.NDArray[np.floating]:
     """Replace NaNs in a 2D image with an average of surrounding values
-    
+
     Args:
         img: 2D image
         kernel_size: Size of the kernel to use for averaging
@@ -926,8 +956,10 @@ def estimate_local_velocity(
     valid_points_threshold: int = 10,
     debug: bool = False,
     weights: Optional[npt.NDArray[np.floating]] = None,
-) -> Union[Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]],
-            Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
+) -> Union[
+    Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]],
+    Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]],
+]:
     """Use local polynomial fitting strategy from Bayley et al. 1998 to determine velocity from
     activation map
 
@@ -942,7 +974,7 @@ def estimate_local_velocity(
     Returns:
         v: 3D array of velocity vectors
         t_smoothed: 2D array of smoothed activation times
-        n_points_fit: 2D array of number of points used for local polynomial fitting at each pixel    
+        n_points_fit: 2D array of number of points used for local polynomial fitting at each pixel
     """
     X, Y = np.meshgrid(
         np.arange(activation_times.shape[0]), np.arange(activation_times.shape[1])
@@ -1004,7 +1036,7 @@ def estimate_local_velocity(
         w = w[mask, :]
         A = A[mask, :] * np.sqrt(w)
         b = b[mask] * np.sqrt(w).ravel()
-        
+
         # Check if there are enough points to fit
         n_points_fit[y, x] = len(b)
         if n_points_fit[y, x] < valid_points_threshold:
@@ -1293,40 +1325,32 @@ def analyze_wave_dynamics(
     return results, Tsmoothed, Tsmoothed_dv, divergence, v
 
 
-def fill_nans_with_neighbors(img):
-    isnan = np.isnan(img)
+def downsample_video(
+    raw_img: npt.NDArray,
+    downsample_factor: int,
+    aa: Union[str, None] = "gaussian",
+) -> npt.NDArray:
+    """Downsample video in space (in integer increments) with optional anti-aliasing
 
-
-def downsample_video(raw_img, downsample_factor, aa="gaussian"):
-    """Downsample video in space with optional anti-aliasing"""
+    """
     if downsample_factor == 1:
         di = raw_img
     else:
         if aa == "butter":
             sos = signal.butter(4, 1 / downsample_factor, output="sos")
-            smoothed = np.apply_over_axes(
+            smoothed: npt.NDArray = np.apply_over_axes(
                 lambda a, axis: np.apply_along_axis(
                     lambda x: signal.sosfiltfilt(sos, x), axis, a
                 ),
                 raw_img,
                 [1, 2],
             )
-            di = smoothed[
-                :, np.arange(smoothed.shape[1], step=downsample_factor, dtype=int), :
-            ]
-            di = di[
-                :, :, np.arange(smoothed.shape[2], step=downsample_factor, dtype=int)
-            ]
+            di = smoothed[:,::downsample_factor,::downsample_factor]
         elif aa == "gaussian":
-            smoothed = ndimage.gaussian_filter(
-                raw_img, [0, downsample_factor, downsample_factor]
+            smoothed: npt.NDArray = ndimage.gaussian_filter(
+                raw_img, [0, (downsample_factor-1)/2, (downsample_factor-1)/2]
             )
-            di = smoothed[
-                :, np.arange(smoothed.shape[1], step=downsample_factor, dtype=int), :
-            ]
-            di = di[
-                :, :, np.arange(smoothed.shape[2], step=downsample_factor, dtype=int)
-            ]
+            di = smoothed[:,::downsample_factor,::downsample_factor]
         else:
             di = transform.downscale_local_mean(
                 raw_img, (1, downsample_factor, downsample_factor)
@@ -1509,7 +1533,7 @@ def image_to_sta(
                 mean_trace[[pks[-1] - b1, pks[-1], pks[-1] + b2]],
                 "rx",
             )
-        sta_bounds = (b1,b2)
+        sta_bounds = (b1, b2)
 
     # Collect spike traces according to bounds
     sta_trace = traces.get_sta(
@@ -1519,11 +1543,17 @@ def image_to_sta(
     # Get STA video
 
     sta, spike_images = spike_triggered_average_video(
-        dFF_img, pks, sta_bounds, normalize_height=normalize_height, full_output=full_output
+        dFF_img,
+        pks,
+        sta_bounds,
+        normalize_height=normalize_height,
+        full_output=full_output,
     )
 
     if plot:
-        axes[2].plot((np.arange(sta_bounds[0] + sta_bounds[1]) - sta_bounds[0]) / fs, sta_trace)
+        axes[2].plot(
+            (np.arange(sta_bounds[0] + sta_bounds[1]) - sta_bounds[0]) / fs, sta_trace
+        )
         axes[2].set_xlabel("Time (s)")
         axes[2].set_ylabel(r"$F/F_0$")
         axes[2].set_title("STA taps: %d + %d" % (sta_bounds[0], sta_bounds[1]))
@@ -2298,10 +2328,12 @@ def translate_image(img: npt.NDArray, shift: Tuple[float, float]) -> npt.NDArray
     )
 
 
-def match_snap_to_data(img: npt.NDArray, ref: npt.NDArray, scale_factor: float = 4) -> npt.NDArray:
+def match_snap_to_data(
+    img: npt.NDArray, ref: npt.NDArray, scale_factor: float = 4
+) -> npt.NDArray:
     """Match a snap of arbitrary size to an equally sized or smaller reference data set, assuming
     both ROIs are centered in camera coordinates
-    
+
     Args:
         img: Image to match
         ref: Reference image to match to
@@ -2314,8 +2346,11 @@ def match_snap_to_data(img: npt.NDArray, ref: npt.NDArray, scale_factor: float =
     cropped, _ = crop_min_shape(downscaled, ref)
     return cropped
 
-def crop_min_shape(im1: npt.NDArray, im2: npt.NDArray) -> Tuple[npt.NDArray, npt.NDArray]:
-    """ Crops two images to the minimum shape of the two, assuming the images are centered 
+
+def crop_min_shape(
+    im1: npt.NDArray, im2: npt.NDArray
+) -> Tuple[npt.NDArray, npt.NDArray]:
+    """Crops two images to the minimum shape of the two, assuming the images are centered
     in the camera coordinates
 
     Args:
@@ -2327,8 +2362,12 @@ def crop_min_shape(im1: npt.NDArray, im2: npt.NDArray) -> Tuple[npt.NDArray, npt
     min_shape = np.min([im1.shape[:2], im2.shape[:2]], axis=0)
     diff_shape_im1 = np.array(im1.shape[:2]) - min_shape
     diff_shape_im2 = np.array(im2.shape[:2]) - min_shape
-    cropped_im1 = im1[diff_shape_im1[0]//2:diff_shape_im1[0]//2+min_shape[0],
-                           diff_shape_im1[1]//2:diff_shape_im1[1]//2+min_shape[1]]
-    cropped_im2 = im2[diff_shape_im2[0]//2:diff_shape_im2[0]//2+min_shape[0],
-                            diff_shape_im2[1]//2:diff_shape_im2[1]//2+min_shape[1]]
+    cropped_im1 = im1[
+        diff_shape_im1[0] // 2 : diff_shape_im1[0] // 2 + min_shape[0],
+        diff_shape_im1[1] // 2 : diff_shape_im1[1] // 2 + min_shape[1],
+    ]
+    cropped_im2 = im2[
+        diff_shape_im2[0] // 2 : diff_shape_im2[0] // 2 + min_shape[0],
+        diff_shape_im2[1] // 2 : diff_shape_im2[1] // 2 + min_shape[1],
+    ]
     return cropped_im1, cropped_im2
