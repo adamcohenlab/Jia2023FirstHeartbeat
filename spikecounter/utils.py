@@ -193,6 +193,10 @@ def load_experiment_metadata(
             expt_data = mat73.loadmat(
                 os.path.join(root_dir, expt_name, "output_data_py.mat")
             )["dd_compat_py"]
+        except TypeError:
+            expt_data = scio.loadmat(
+                os.path.join(root_dir, expt_name, "output_data_py.mat")
+            )["dd_compat_py"]
         except FileNotFoundError as err:
             warnings.warn(str(err))
             expt_data = None
