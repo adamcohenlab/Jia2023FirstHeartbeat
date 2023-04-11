@@ -1,16 +1,15 @@
 import argparse
 import subprocess
 import os
-import shutil
-import re
-import numpy as np
 import pandas as pd
-from datetime import datetime
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootpath", type=str)
 parser.add_argument("crosstalk_channel", type=str)
 parser.add_argument("--expt_info", type=str, default="analysis/experiment_data.csv")
+parser.add_argument(
+    "--initial_subfolder", help="Subfolder for initial data", default=""
+)
 parser.add_argument("--output_dir", default=None)
 parser.add_argument("--scale_factor", type=int, default=2)
 parser.add_argument("--remove_from_start", type=int, default=0)
@@ -39,25 +38,46 @@ bg_const = args.bg_const
 
 if output_dir is None:
     output_dir = rootpath
-    
-expt_info = pd.read_csv(os.path.join(rootpath,args.expt_info), dtype=str).sort_values("start_time")
+
+expt_info = pd.read_csv(os.path.join(rootpath, args.expt_info), dtype=str).sort_values(
+    "start_time"
+)
 print(expt_info.head())
 for s in ["downsampled", "stim_frames_removed", "corrected", "denoised"]:
     os.makedirs(os.path.join(output_dir, s), exist_ok=True)
     os.makedirs(os.path.join(output_dir, "analysis", s), exist_ok=True)
-    expt_info.to_csv(os.path.join(output_dir, "analysis", s, "experiment_data.csv"), index=False)
+    expt_info.to_csv(
+        os.path.join(output_dir, "analysis", s, "experiment_data.csv"), index=False
+    )
 
-    
+
 for i in range(expt_info.shape[0]):
     f = expt_info.iloc[i]["file_name"]
-    # sensor = expt_info.iloc[i]["sensor"]
-    # if "negative" not in f:
-    #     if "FRGECO" in sensor:
-    #         bg_const += 17.549021818391
-    #     else:
-    #         bg_const += 37.3174772081532
-    sh_line = ["sbatch", "/n/home11/bjia/SpikeCounter/cluster/preprocess_stim2.sh", rootpath, f, args.crosstalk_channel, output_dir, str(args.remove_from_start),\
-              str(args.remove_from_end), str(args.scale_factor),\
-              str(args.start_from_downsampled), str(args.n_pcs), str(args.skewness_threshold), str(args.left_shoulder_freq), str(args.right_shoulder_freq), str(int(args.invert)), args.pb_correct_method, str(args.lpad), str(args.rpad), args.decorr_pct, args.pb_correct_mask, str(args.denoise), str(args.decorrelate), str(bg_const)]
+    sh_line = [
+        "sbatch",
+        "/n/home11/bjia/SpikeCounter/cluster/preprocess_stim2.sh",
+        rootpath,
+        f,
+        args.crosstalk_channel,
+        output_dir,
+        str(args.remove_from_start),
+        str(args.remove_from_end),
+        str(args.scale_factor),
+        str(args.start_from_downsampled),
+        str(args.n_pcs),
+        str(args.skewness_threshold),
+        str(args.left_shoulder_freq),
+        str(args.right_shoulder_freq),
+        str(int(args.invert)),
+        args.pb_correct_method,
+        str(args.lpad),
+        str(args.rpad),
+        args.decorr_pct,
+        args.pb_correct_mask,
+        str(args.denoise),
+        str(args.decorrelate),
+        str(bg_const),
+        str(args.initial_subfolder)
+    ]
     print(sh_line)
-    subprocess.run(sh_line)
+    subprocess.run(sh_line, check=True)

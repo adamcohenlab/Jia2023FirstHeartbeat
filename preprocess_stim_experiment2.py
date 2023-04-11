@@ -81,7 +81,7 @@ else:
 # Make new subfolders
 output_folders = {}
 for d in ["downsampled", "stim_frames_removed", "corrected", "denoised"]:
-    if args.initial_subfolder:
+    if args.initial_subfolder: # pylint: disable=no-member
         output_folders[d] = output_folder/f"{args.initial_subfolder}_{d}"
     else:
         output_folders[d] = output_folder/d
