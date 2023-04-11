@@ -159,13 +159,17 @@ def correct_photobleach(
     return_params: bool  = False,
     invert: bool = False,
     **cost_function_params
-):
+) -> Union[npt.NDArray, Tuple[npt.NDArray, npt.NDArray, npt.NDArray]]:
     """Correct trace for photobleaching"""
     tidx = np.arange(len(trace))
     if method == "linear":
         slope, _, _, _, _ = stats.linregress(tidx, y=trace)
         photobleach = slope * tidx
         corrected_trace = trace - photobleach
+
+        if return_params:
+            return corrected_trace, photobleach, np.array([slope])
+        
     elif method == "localmin":
         """From Hochbaum 2014 Nat. Methods"""
         if nsamps is None:
@@ -177,6 +181,9 @@ def correct_photobleach(
         )
         photobleach = signal.convolve(photobleach_padded, kernel / nsamps, mode="valid")
         corrected_trace = trace / photobleach
+
+        if return_params:
+            return corrected_trace, photobleach, np.array([])
     elif method == "monoexp":
         tpoints = np.arange(len(trace))
 
@@ -229,6 +236,7 @@ def correct_photobleach(
             )
         photobleach = popt[0] * np.exp(tpoints * popt[1])
         corrected_trace = trace - photobleach
+
         if return_params:
             return corrected_trace, photobleach, popt
     elif method == "biexp":

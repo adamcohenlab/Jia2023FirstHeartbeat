@@ -7,7 +7,9 @@ from pathlib import Path
 import subprocess
 import multiprocessing
 import os
+import logging
 
+logger = multiprocessing.log_to_stderr(logging.DEBUG)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootdir", help="Root directory")
@@ -34,9 +36,9 @@ for subdir in rootdir.iterdir():
 if pool_size == 0:
     pool_size = min(len(cmd_strings), max_n_threads)
 else:
-    pool_size = min(pool_size, min(len(cmd_strings), max_n_threads))
+    pool_size = min(pool_size, len(cmd_strings), max_n_threads)
 
 print(f"pool_size: {pool_size}")
-p = multiprocessing.Pool(pool_size)
-p.map(subprocess.run, cmd_strings)
-p.close()
+
+with multiprocessing.Pool(pool_size) as p:
+    res = p.map(subprocess.run, cmd_strings)

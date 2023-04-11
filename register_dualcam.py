@@ -1,7 +1,5 @@
 #! /usr/bin/python3
-""" Perform registration of experiments with recordings on two cameras given a known transformation
-
-"""
+""" Perform registration of experiments with recordings on two cameras given a known transformation"""
 import argparse
 from pathlib import Path
 import os

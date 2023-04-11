@@ -18,7 +18,6 @@ from numpy import typing as npt
 from skimage import transform
 
 import matplotlib.pyplot as plt
-from matplotlib import colors
 from ipywidgets import interact
 from scipy import interpolate, signal
 from scipy import io as scio
@@ -26,8 +25,9 @@ import re
 import pandas as pd
 import mat73
 
+
 def str2bool(v: str) -> bool:
-    """ convert string to boolean value
+    """convert string to boolean value
 
     Args:
         v: string to convert
@@ -43,18 +43,26 @@ def str2bool(v: str) -> bool:
     else:
         raise argparse.ArgumentTypeError("Boolean value expected.")
 
-def initialize_logging(logging_path: Union[str, PathLike[Any]], capture_warnings: bool = False) -> logging.Logger:
+
+def initialize_logging(
+    logging_path: Union[str, PathLike[Any]], capture_warnings: bool = False
+) -> logging.Logger:
     """Initialize logging to a file and the console
 
     Args:
         logging_path: Path to the log file
         captureWarnings: Whether to capture warnings
     """
+    logging_path = Path(logging_path)
+    if logging_path.is_dir():
+        logging_path = logging_path / "debug.log"
+
     file_handler = RotatingFileHandler(
         logging_path, mode="w+", maxBytes=int(1e6), backupCount=1
     )
-    formatter = logging.Formatter("%(asctime)s:%(levelname)s; %(message)s",
-                              "%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(
+        "%(asctime)s:%(levelname)s; %(message)s", "%Y-%m-%d %H:%M:%S"
+    )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
     logging.captureWarnings(capture_warnings)
@@ -62,8 +70,6 @@ def initialize_logging(logging_path: Union[str, PathLike[Any]], capture_warnings
     logger.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
     return logger
-
-
 
 
 def custom_newton_lsq(
@@ -115,7 +121,7 @@ def pad_func_unpad(arr, func, pad_width, **pad_params):
 
 
 def make_iterable(x: Any) -> Generator[Any, Any, Any]:
-    """ Catch non-iterable objects and make them iterable
+    """Catch non-iterable objects and make them iterable
     Args:
         x (Any): object to be made iterable
     Returns:
@@ -139,6 +145,7 @@ def reload_libraries(libraries):
     """
     for lib in make_iterable(libraries):
         importlib.reload(lib)
+
 
 def interpolate_invalid_values(
     arr: npt.NDArray, mask: npt.NDArray[np.bool_], kind: str = "previous"
@@ -273,7 +280,9 @@ def process_experiment_metadata(
     return new_df
 
 
-def match_experiments_to_snaps(expt_data: pd.DataFrame, snap_data: pd.DataFrame) -> pd.DataFrame:
+def match_experiments_to_snaps(
+    expt_data: pd.DataFrame, snap_data: pd.DataFrame
+) -> pd.DataFrame:
     """Matches experiments to the corresponding snap of the same embryo taken closest in time.
 
     Args:
@@ -542,9 +551,10 @@ def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5, 95], cmap=No
     )
 
 
-def traces_to_dict(matdata: Dict[str, Any]) -> Tuple[Dict[str, Any], npt.NDArray[np.floating]]:
-    """ Extract traces from DAQ data, synchronize to camera frames, and return as a dictionary.
-    """
+def traces_to_dict(
+    matdata: Dict[str, Any]
+) -> Tuple[Dict[str, Any], npt.NDArray[np.floating]]:
+    """Extract traces from DAQ data, synchronize to camera frames, and return as a dictionary."""
     # Find daq indices where camera frames were acquired
     rising_edges = np.argwhere(np.diff(matdata["frame_counter"]) == 1).ravel()
     if isinstance(matdata["task_traces"], dict):

@@ -408,7 +408,7 @@ def plot_pca_data(
     n_components: int = 5,
     pc_title: Optional[Callable[..., str]] = None,
     mode="temporal",
-) -> Tuple[figure.Figure, Collection[axes.Axes]]:
+) -> None:
     """Show spatial principal components of a video and the corresponding
     temporal trace (dot product).
 
@@ -428,15 +428,14 @@ def plot_pca_data(
     Raises:
         ValueError: if mode is not "temporal" or "spatial"
     """
-    if pc_title is None:
 
+    if pc_title is None:
         def pct(j, *args):
             return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
-
         pc_title = pct
     if mode == "temporal":
         for i in range(n_components):
-            fig1, axs = plt.subplots(
+            _, axs = plt.subplots(
                 1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [1, 3]}
             )
             axs = np.array(axs).ravel()
@@ -449,7 +448,7 @@ def plot_pca_data(
             axs[1].plot(dot_trace)
     elif mode == "spatial":
         for i in range(n_components):
-            fig1, axs = plt.subplots(
+            _, axs = plt.subplots(
                 1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [3, 1]}
             )
             axs = np.array(axs).ravel()
@@ -461,7 +460,6 @@ def plot_pca_data(
             axs[1].imshow(cropped_region_image)
     else:
         raise ValueError("mode must be 'temporal' or 'spatial'")
-    return fig1, axs
 
 
 def extract_roi_traces(
@@ -624,7 +622,7 @@ def kernel_fit_single_trace(trace, kernel, minshift, maxshift, offset_width):
 def spline_fit_single_trace(
     trace: npt.ArrayLike,
     s: float,
-    knots: int,
+    knots: Collection[float],
     plot: bool = False,
     n_iterations: int = 100,
     eps: float = 0.01,
@@ -906,7 +904,7 @@ def clamp_intensity(
 
 
 def normalize_and_clamp(
-    img: npt.NDArray[np.floating], pctiles: tuple[Optional[float], float] = (None, 99)
+    img: npt.NDArray[np.floating], pctiles: Tuple[float, float] = (0, 99)
 ) -> npt.NDArray[np.floating]:
     """Normalize an image and clamp values to the given percentiles
 
@@ -917,11 +915,7 @@ def normalize_and_clamp(
     Returns:
         processed_img: 2D image with values clamped to the given percentiles
     """
-    if pctiles[0] is None:
-        min_val = 0
-        max_val = np.nanpercentile(img, pctiles[1])
-    else:
-        min_val, max_val = np.nanpercentile(img, [*pctiles])
+    min_val, max_val = np.nanpercentile(img, [*pctiles])
     processed_img = (img - min_val) / (max_val - min_val)
     processed_img[processed_img > 1] = 1
     processed_img[processed_img < 0] = 0
@@ -1057,15 +1051,15 @@ def estimate_local_velocity(
 
 
 def correct_photobleach(
-    img,
-    mask=None,
-    method="localmin",
-    nsamps=51,
-    amplitude_window=0.5,
-    dt=0.01,
-    invert=False,
-    return_params=False,
-):
+    img: npt.NDArray[Union[np.floating, np.integer]],
+    mask: Union[npt.NDArray[np.bool_], None]=None,
+    method: str = "localmin",
+    nsamps: int = 51,
+    amplitude_window: float = 0.5,
+    dt: float = 0.01,
+    invert: bool = False,
+    return_params: bool = False,
+) -> Union[npt.NDArray[np.floating], Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
     """Perform photobleach correction on each pixel in an image"""
     if method == "linear":
         # Perform linear fit to each pixel independently over time
@@ -1076,22 +1070,23 @@ def correct_photobleach(
         corrected_img = regressed_traces.reshape(img.shape)
 
     elif method == "localmin":
-        #
+        # Correct against moving minimum of masked average
         if invert:
+            # for negative-going spikes (e.g. Voltron)
             mean_img = img.mean(axis=0)
             raw_img = 2 * mean_img - img
         else:
             raw_img = img
         mean_trace = extract_mask_trace(raw_img, mask)
-        _, pbleach = traces.correct_photobleach(
-            mean_trace, method=method, nsamps=nsamps
+        _, pbleach, _ = traces.correct_photobleach(
+            mean_trace, method=method, nsamps=nsamps, return_params=True
         )
         corrected_img = np.divide(raw_img, pbleach[:, np.newaxis, np.newaxis])
         if return_params:
-            return corrected_img, pbleach
-        # print(corrected_img.shape)
+            return corrected_img, pbleach, np.array([])
 
     elif method == "monoexp":
+        # Correct against a monoexponential decay of fluorescence
         mean_trace = extract_mask_trace(img, mask)
         background_level = np.percentile(img, 5, axis=0)
         _, pbleach, params = traces.correct_photobleach(
@@ -1168,7 +1163,8 @@ def correct_photobleach(
         # mean_img = img.mean(axis=0)
         mean_trace = img.mean(axis=(1, 2))
         corrected_img = regress_video(img, mean_trace)
-
+        if return_params:
+            return corrected_img, mean_trace, np.array([])
     else:
         raise ValueError("Not Implemented")
 
