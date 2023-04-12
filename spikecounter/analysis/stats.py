@@ -366,7 +366,7 @@ def multi_regress(data_matrix, traces, regress_dc=True):
 
     if regress_dc:
         I = np.concatenate(
-            [np.ones((1, data_matrix.shape[0])), tr - tr.mean(axis=1)], axis=0
+            [np.ones((1, data_matrix.shape[0])), tr - tr.mean(axis=1)[:,None]], axis=0
         )
     else:
         I = tr

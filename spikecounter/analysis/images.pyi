@@ -7,6 +7,7 @@ from typing import overload
 from os import PathLike
 import numpy.typing as npt
 import numpy as np
+from matplotlib import axes
 
 NPGeneric = TypeVar("NPGeneric", bound=np.generic)
 
@@ -47,17 +48,6 @@ def load_image(
     Union[npt.NDArray[np.generic], List[npt.NDArray[np.generic]]],
     Optional[Dict[str, Any]],
 ]: ...
-def load_image(
-    rootdir: Union[str, PathLike[Any]],
-    expt_name: str,
-    subfolder: str = "",
-    raw: bool = True,
-    cam_indices: Optional[Union[int, Iterable[int]]] = None,
-    expt_metadata: Optional[Dict[str, Any]] = None,
-) -> Tuple[
-    Union[npt.NDArray[np.generic], List[npt.NDArray[np.generic]]],
-    Optional[Dict[str, Any]],
-]: ...
 
 
 def downsample_video(
@@ -81,4 +71,15 @@ def spline_fit_single_trace(
 
 def spline_timing(
     img: npt.NDArray, s: float = 0.1, n_knots: int = 4, upsample_rate: float = 1
-):
+): ...
+
+def extract_background_traces(
+    img: npt.NDArray, mode: Union[str, Collection[str]] = "all"
+) -> npt.NDArray: ...
+
+def get_image_dFF(
+    img: npt.NDArray,
+    baseline_percentile: float = 10,
+    t_range: Tuple[int, int] = (0, -1),
+    invert: bool = False,
+): ...

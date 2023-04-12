@@ -55,6 +55,7 @@ MAX_INT32 = np.iinfo(np.int32).max
 T = TypeVar("T")
 NPGeneric = TypeVar("NPGeneric", bound=np.generic)
 
+
 def regress_video(
     img: npt.NDArray, trace_array: npt.NDArray, regress_dc: bool = True
 ) -> npt.NDArray:
@@ -430,8 +431,10 @@ def plot_pca_data(
     """
 
     if pc_title is None:
+
         def pct(j, *args):
             return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
+
         pc_title = pct
     if mode == "temporal":
         for i in range(n_components):
@@ -514,6 +517,69 @@ def background_subtract(img: npt.NDArray, dark_level: int = 100) -> npt.NDArray:
         img: 3D array of background subtracted image data (timepoints x pixels x pixels)
     """
     return img - dark_level
+
+
+def extract_background_traces(
+    img: npt.NDArray, mode: Union[str, Collection[str]] = "all"
+) -> npt.NDArray:
+    """Use one or more of several heuristics to find possible sources of background
+
+    Args:
+        img: 3D array of raw image data (timepoints x pixels x pixels)
+        mode: "all" or a list of strings. If "all", use all available methods. Otherwise, use only
+            the methods specified in the list.
+    Returns:
+        background_traces: 2D array of background traces (timepoints x methods)
+    """
+    if mode == "all":
+        mode = ["linear", "mean", "dark", "corners"]
+    background_traces: List[npt.NDArray] = []
+
+    tr: Union[npt.NDArray, List[npt.NDArray]]
+    for m in mode:
+        if m == "linear":
+            tr = np.linspace(-1, 1, img.shape[0])
+        elif m == "mean":
+            tr = img.mean(axis=(1, 2))
+        elif m in ("exponential", "exp"):
+            ## TBD: refactor exponential fit function in traces.py photobleach correction
+            tr = np.zeros(img.shape[0])
+        elif m in ("biexponential", "biexp"):
+            ## TBD: refactor exponential fit function in traces.py photobleach correction
+            tr = np.zeros(img.shape[0])
+        elif m == "dark":
+            mean_img = img.mean(axis=0)
+            mask = mean_img < np.percentile(mean_img, 10)
+            tr = extract_mask_trace(img, mask)
+        elif m == "corners":
+            mean_img = img.mean(axis=0)
+            tr = []
+            divs = 5
+            div0 = mean_img.shape[0] // divs
+            div1 = mean_img.shape[1] // divs
+            mask = np.zeros(mean_img.shape, dtype=bool)
+            mask[:div0, :div1] = True
+            tr.append(extract_mask_trace(img, mask))
+            mask = np.zeros(mean_img.shape, dtype=bool)
+            mask[-div0:, :div1] = True
+            tr.append(extract_mask_trace(img, mask))
+            mask = np.zeros(mean_img.shape, dtype=bool)
+            mask[:div0, -div1:] = True
+            tr.append(extract_mask_trace(img, mask))
+            mask = np.zeros(mean_img.shape, dtype=bool)
+            mask[-div0:, -div1:] = True
+            tr.append(extract_mask_trace(img, mask))
+        else:
+            tr = np.zeros(img.shape[0])
+        if isinstance(tr, np.ndarray):
+            tr = [tr]
+        background_traces.extend(tr)
+    combined_traces = np.array(background_traces).T
+    combined_traces -= combined_traces.mean(axis=0)
+    combined_traces /= (combined_traces.max(axis=0) - combined_traces.min(axis=0))[
+        None, :
+    ]
+    return combined_traces
 
 
 def get_spike_kernel(img, kernel_length, nbefore, peak_prominence, savgol_length=51):
@@ -1052,14 +1118,17 @@ def estimate_local_velocity(
 
 def correct_photobleach(
     img: npt.NDArray[Union[np.floating, np.integer]],
-    mask: Union[npt.NDArray[np.bool_], None]=None,
+    mask: Union[npt.NDArray[np.bool_], None] = None,
     method: str = "localmin",
     nsamps: int = 51,
     amplitude_window: float = 0.5,
     dt: float = 0.01,
     invert: bool = False,
     return_params: bool = False,
-) -> Union[npt.NDArray[np.floating], Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
+) -> Union[
+    npt.NDArray[np.floating],
+    Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]],
+]:
     """Perform photobleach correction on each pixel in an image"""
     if method == "linear":
         # Perform linear fit to each pixel independently over time
@@ -1171,8 +1240,24 @@ def correct_photobleach(
     return corrected_img
 
 
-def get_image_dFF(img, baseline_percentile=10, t_range=(0, -1)):
-    """Convert a raw image into dF/F"""
+def get_image_dFF(
+    img: npt.NDArray,
+    baseline_percentile: float = 10,
+    t_range: Tuple[int, int] = (0, -1),
+    invert: bool = False,
+):
+    """Convert a raw image into dF/F
+    
+    Args:
+        img: 3D array of raw image data
+        baseline_percentile: percentile of time range to use for baseline
+        t_range: time range to use for baseline
+        invert: whether to invert the image (for negative-going voltage indicators)
+    Returns:
+        dFF: 3D array of dF/F image data
+    """
+    if invert:
+        img = 2*np.mean(img, axis=0) - img
     baseline = np.percentile(img[t_range[0] : t_range[1]], baseline_percentile, axis=0)
     dFF = img / baseline
     return dFF
@@ -1326,9 +1411,7 @@ def downsample_video(
     downsample_factor: int,
     aa: Union[str, None] = "gaussian",
 ) -> npt.NDArray:
-    """Downsample video in space (in integer increments) with optional anti-aliasing
-
-    """
+    """Downsample video in space (in integer increments) with optional anti-aliasing"""
     if downsample_factor == 1:
         di = raw_img
     else:
@@ -1341,12 +1424,12 @@ def downsample_video(
                 raw_img,
                 [1, 2],
             )
-            di = smoothed[:,::downsample_factor,::downsample_factor]
+            di = smoothed[:, ::downsample_factor, ::downsample_factor]
         elif aa == "gaussian":
             smoothed: npt.NDArray = ndimage.gaussian_filter(
-                raw_img, [0, (downsample_factor-1)/2, (downsample_factor-1)/2]
+                raw_img, [0, (downsample_factor - 1) / 2, (downsample_factor - 1) / 2]
             )
-            di = smoothed[:,::downsample_factor,::downsample_factor]
+            di = smoothed[:, ::downsample_factor, ::downsample_factor]
         else:
             di = transform.downscale_local_mean(
                 raw_img, (1, downsample_factor, downsample_factor)
