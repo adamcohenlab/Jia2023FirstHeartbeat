@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 from spikecounter.analysis import images
 from spikecounter import utils
 import logging
@@ -17,9 +18,15 @@ parser.add_argument("--block_size", default=375, type=int)
 parser.add_argument("--offset", default=0.05, type=float)
 
 args = parser.parse_args()
-output_root = os.path.join(args.data_folder, "analysis", "individual_fish_recordings")
+output_root = Path(args.data_folder, "analysis", "individual_fish_recordings")
+data_folder = Path(args.data_folder)
 os.makedirs(output_root, exist_ok=True)
-logging.basicConfig(filename=os.path.join(output_root, "debug.log"), level=logging.DEBUG, encoding="utf-8", filemode="w")
+logging.basicConfig(
+    filename=output_root / "debug.log",
+    level=logging.DEBUG,
+    encoding="utf-8",
+    filemode="w",
+)
 
 expt_info = pd.read_csv(args.expt_info_path).sort_values("start_time")
 
@@ -34,27 +41,34 @@ expt_info = expt_info.reset_index().set_index(expt_index)
 n_embryos = None
 for idx in expt_info.index.unique():
     idx_string = "_".join([str(f) for f in utils.make_iterable(idx)])
-    output_path = os.path.join(output_root, idx_string)
+    output_path = output_root/idx_string
     os.makedirs(output_path, exist_ok=True)
     curr_batch_info = expt_info.loc[idx]
     segmentation_mask = []
     # for i in range(2):
     for i in range(curr_batch_info.shape[0]):
         file_name = curr_batch_info["file_name"].iloc[i]
-        img = skio.imread(os.path.join(args.data_folder, "%s.tif" % file_name))
-        ri, rp, rm, _ = images.split_embryos(img, offset=args.offset, block_size=args.block_size)
-        
+        img = skio.imread(data_folder/f"{file_name}.tif")
+        ri, rp, rm, _ = images.split_embryos(
+            img, offset=args.offset, block_size=args.block_size
+        )
+
         for j in range(rp.shape[0]):
-            embryo = j+1
-            embryo_directory = os.path.join(output_root, idx_string, "E%d" % embryo)
+            embryo = j + 1
+            embryo_directory = output_root/idx_string/f"E{embryo}"
             os.makedirs(embryo_directory, exist_ok=True)
-            skio.imsave(os.path.join(embryo_directory, "E%d_%s.tif" % (embryo, file_name)), ri[j])
+            skio.imsave(
+                embryo_directory/f"E{embryo}_{file_name}.tif", ri[j]
+            )
         segmentation_mask.append(rm)
-        
-        logging.info("%d embryos detected for file %s" % (rp.shape[0], file_name))
+
+        logging.info(f"{rp.shape[0]} embryos detected for file {file_name}")
         if n_embryos is None:
             n_embryos = rp.shape[0]
         elif n_embryos != rp.shape[0]:
-            logging.warning("Mismatch in number of embryos at file %s" % file_name)
+            logging.warning(f"Mismatch in number of embryos at file {file_name}")
     segmentation_mask = np.array(segmentation_mask, dtype=np.int32)
-    skio.imsave(os.path.join(output_root, idx_string, "segmentation_mask.tif"), segmentation_mask)
+    skio.imsave(
+        os.path.join(output_root, idx_string, "segmentation_mask.tif"),
+        segmentation_mask,
+    )
