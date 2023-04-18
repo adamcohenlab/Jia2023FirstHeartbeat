@@ -2,7 +2,7 @@
 """
 import os
 from pathlib import Path
-from typing import Union, Iterable, Tuple, Collection, Dict, Optional
+from typing import Union, Iterable, Tuple, Collection, Dict, Optional, Callable, Any
 from numpy import typing as npt
 
 import pandas as pd
@@ -99,8 +99,11 @@ def find_stim_starts(
             curr_stim = rising_ts[i]
     return rising_ts[valid_stims.astype(bool)]
 
-def generate_invalid_frame_indices(stim_trace: npt.NDArray[np.generic]) -> npt.NDArray[np.int64]:
-    """ Generate indices of frames that should be excluded from analysis due to stimulation.
+
+def generate_invalid_frame_indices(
+    stim_trace: npt.NDArray[np.generic],
+) -> npt.NDArray[np.int64]:
+    """Generate indices of frames that should be excluded from analysis due to stimulation.
 
     Args:
         stim_trace: 1D array of stimulation trace.
@@ -156,11 +159,27 @@ def correct_photobleach(
     method: str = "linear",
     nsamps: Optional[int] = None,
     plot: bool = False,
-    return_params: bool  = False,
+    return_params: bool = False,
     invert: bool = False,
-    **cost_function_params
-) -> Union[npt.NDArray, Tuple[npt.NDArray, npt.NDArray, npt.NDArray]]:
-    """Correct trace for photobleaching"""
+    **cost_function_params,
+) -> Tuple[npt.NDArray, npt.NDArray, Any]:
+    """Correct trace for photobleaching using one of several methods.
+    
+    Available methods: linear, localmin, exponential, biexponential. Exponential and biexponential
+    methods contain a soft constraint to ignore spikes.
+
+    Args:
+        trace: 1D array of fluorescence trace.
+        method: Method to use for photobleaching correction. Options are "linear", "localmin",
+            "exponential", "biexponential".
+        nsamps: Number of samples to use for localmin method.
+        plot: Whether to plot the photobleaching correction.
+        return_params: Whether to return the parameters used for the photobleaching correction.
+        invert: Whether spikes go downwards in the trace.
+        cost_function_params: Additional parameters to pass to the cost function.
+    Returns:
+        corrected_trace: 1D array of corrected fluorescence trace.
+    """
     tidx = np.arange(len(trace))
     if method == "linear":
         slope, _, _, _, _ = stats.linregress(tidx, y=trace)
@@ -169,9 +188,10 @@ def correct_photobleach(
 
         if return_params:
             return corrected_trace, photobleach, np.array([slope])
-        
+
     elif method == "localmin":
-        """From Hochbaum 2014 Nat. Methods"""
+        # From Hochbaum 2014 Nat. Methods. The idea is to estimate the local minimum using a moving
+        # window that is longer than the typical spike.
         if nsamps is None:
             raise ValueError("nsamps required if mode is localmin")
         kernel = np.ones(nsamps)
@@ -184,20 +204,35 @@ def correct_photobleach(
 
         if return_params:
             return corrected_trace, photobleach, np.array([])
+
     elif method == "monoexp":
-        tpoints = np.arange(len(trace))
 
-        def expon_below(x, a=1, b=1):
-            y = x[0] * np.exp(tpoints * x[1]) + x[2]
-            # soft_constraint = a*np.exp(b*(y - trace))
-            soft_constraint = b * np.sum((np.maximum(y - trace, 0)) ** a)
-            # soft_constraint = a*np.sum(np.log(np.maximum(y-trace,0)+1))
+        def expon_soft_constraint(
+            x: npt.NDArray[np.floating],
+            constraint_function: Callable,
+            a: float = 1,
+            b: float = 1,
+        ) -> npt.NDArray[np.floating]:
+            """Single exponential decay function with soft constraint
+
+            This function allows spikes to be ignored when fitting, given that their direction is
+            known. i.e. the soft constraint enforces the fit to lie above or below the baseline
+            instead of being pulled across it by the spikes.
+
+            Args:
+                x: 1D array of parameters for the exponential decay function.
+                    x[0] = amplitude
+                    x[1] = time constant
+                    x[2] = constant offset
+                constraint_function: Function that takes the trace and returns a soft constraint
+                a: Parameter for soft constraint function
+                b: Parameter for soft constraint function
+            Returns:
+                cost: value of cost function for the optimization
+            """
+            y = x[0] * np.exp(tidx * x[1]) + x[2]
+            soft_constraint = constraint_function(y, a, b)
             cost = np.sum((y - trace) ** 2 + soft_constraint)
-            return cost
-
-        def expon_above(x, a=1, b=1):
-            y = x[0] * np.exp(tpoints * x[1]) + x[2]
-            cost = np.sum((y - trace) ** 2 + a * np.exp(b * (trace - y)))
             return cost
 
         pct1, pct2, med = np.percentile(trace, [5, 85, 50])
@@ -208,13 +243,21 @@ def correct_photobleach(
         if invert:
             p0[2] = np.max(trace)
             res = optimize.minimize(
-                lambda x: expon_above(x, **cost_function_params),
+                lambda x: expon_soft_constraint(
+                    x,
+                    lambda y, a, b: a * np.exp(b * (trace - y)),
+                    **cost_function_params,
+                ),
                 p0,
                 bounds=[(0, np.inf), (-np.inf, 0), (-np.inf, np.inf)],
             )
         else:
             res = optimize.minimize(
-                lambda x: expon_below(x, **cost_function_params),
+                lambda x: expon_soft_constraint(
+                    x,
+                    lambda y, a, b: a * np.exp(b * (y - trace)),
+                    **cost_function_params,
+                ),
                 p0,
                 bounds=[
                     (pct2 - pct1, np.inf),
@@ -223,33 +266,44 @@ def correct_photobleach(
                 ],
             )
         popt = res.x
+        # We included the constant offset of the exponential in the fit to get the best estimate of
+        # the other constants. But we don't include it in the correction because constant
+        # subtraction makes dF/F calculations wonky.
+        photobleach = popt[0] * np.exp(tidx * popt[1])
+        corrected_trace = trace - photobleach
+
         if plot:
-            fig1, ax1 = plt.subplots(figsize=(6, 6))
-            ax1.scatter(tpoints, trace, s=0.8, alpha=0.5)
-            ax1.plot(
-                tpoints, popt[0] * np.exp(popt[1] * tpoints) + popt[2], color="red"
-            )
+            _, ax1 = plt.subplots(figsize=(6, 6))
+            ax1.scatter(tidx, trace, s=0.8, alpha=0.5)
+            ax1.plot(tidx, popt[0] * np.exp(popt[1] * tidx) + popt[2], color="red")
             ax1.text(
                 10,
                 popt[2] + popt[0],
-                "%.2E exp(%.2E t) + %.2E" % (popt[0], popt[1], popt[2]),
+                f"{popt[0]:.2E} exp({popt[1]:.2E} t) + {popt[2]:.2E}",
             )
-        photobleach = popt[0] * np.exp(tpoints * popt[1])
-        corrected_trace = trace - photobleach
-
         if return_params:
             return corrected_trace, photobleach, popt
     elif method == "biexp":
-        tpoints = np.arange(len(trace))
 
-        def expon_below(x):
-            y = x[0] * np.exp(tpoints * x[1]) + x[2] * np.exp(tpoints * x[3]) + x[4]
-            cost = np.sum((y - trace) ** 2 + 2 * np.exp(y - trace))
-            return cost
+        def biexpon_soft_constraint(x, constraint_function, a=1, b=1):
+            """ Similar function to expon_soft_constraint, but for a biexponential decay function
 
-        def expon_above(x):
-            y = x[0] * np.exp(tpoints * x[1]) + x[2] * np.exp(tpoints * x[3]) + x[4]
-            cost = np.sum((y - trace) ** 2 + 2 * np.exp(trace - y))
+            Args:
+                x: 1D array of parameters for the exponential decay function.
+                    x[0] = amplitude
+                    x[1] = time constant
+                    x[2] = amplitude
+                    x[3] = time constant
+                    x[4] = constant offset
+                constraint_function: Function that takes the trace and returns a soft constraint
+                a: Parameter for soft constraint function
+                b: Parameter for soft constraint function
+            Returns:
+                cost: value of cost function for the optimization
+            """
+            y = x[0] * np.exp(tidx * x[1]) + x[2] * np.exp(tidx * x[3]) + x[4]
+            soft_constraint = constraint_function(y, a, b)
+            cost = np.sum((y - trace) ** 2 + soft_constraint)
             return cost
 
         guess_tc = -(np.percentile(trace, 95) / np.percentile(trace, 5)) / len(trace)
@@ -264,7 +318,11 @@ def correct_photobleach(
         if invert:
             p0[4] = np.max(trace)
             res = optimize.minimize(
-                lambda x: expon_above(x, **cost_function_params),
+                lambda x: biexpon_soft_constraint(
+                    x,
+                    lambda y, a, b: a * np.exp(b * (trace - y)),
+                    **cost_function_params,
+                ),
                 p0,
                 bounds=[
                     (0, np.inf),
@@ -276,7 +334,11 @@ def correct_photobleach(
             )
         else:
             res = optimize.minimize(
-                lambda x: expon_below(x, **cost_function_params),
+                lambda x: biexpon_soft_constraint(
+                    x,
+                    lambda y, a, b: a * np.exp(b * (y - trace)),
+                    **cost_function_params,
+                ),
                 p0,
                 bounds=[
                     (0, np.inf),
@@ -289,29 +351,28 @@ def correct_photobleach(
         popt = res.x
         if plot:
             fig1, ax1 = plt.subplots(figsize=(6, 6))
-            ax1.scatter(tpoints, trace, s=0.8, alpha=0.5)
+            ax1.scatter(tidx, trace, s=0.8, alpha=0.5)
             ax1.plot(
-                tpoints,
-                popt[0] * np.exp(popt[1] * tpoints)
-                + popt[2] * np.exp(popt[3] * tpoints)
+                tidx,
+                popt[0] * np.exp(popt[1] * tidx)
+                + popt[2] * np.exp(popt[3] * tidx)
                 + popt[4],
                 color="red",
             )
             ax1.text(
                 10,
                 popt[4] + popt[0] + popt[2],
-                "%.2E exp(%.2E t) + %.2E exp(%.2E t) + %.2E"
-                % (popt[0], popt[1], popt[2], popt[3], popt[4]),
+                f"{popt[0]:.2E} exp({popt[1]:.2E} t) + {popt[2]:.2E} exp({popt[3]:.2E} t) + {popt[4]:.2E}",
             )
-        photobleach = popt[0] * np.exp(tpoints * popt[1]) + popt[2] * np.exp(
-            tpoints * popt[3]
+        photobleach = popt[0] * np.exp(tidx * popt[1]) + popt[2] * np.exp(
+            tidx * popt[3]
         )
         corrected_trace = trace - photobleach
         if return_params:
             return corrected_trace, photobleach, popt
     else:
         raise ValueError("Not implemented")
-    return corrected_trace, photobleach
+    return corrected_trace, photobleach, None
 
 
 def intensity_to_dff(
@@ -572,13 +633,15 @@ def interpolate_indices(trace, mask):
     return interpolated
 
 
-def get_spike_traces(trace: npt.NDArray[np.floating], 
-                     peak_indices: Collection, 
-                     bounds: Tuple[int, int],
-                     normalize_height: bool = True) -> npt.NDArray[np.floating]:
+def get_spike_traces(
+    trace: npt.NDArray[np.floating],
+    peak_indices: Collection,
+    bounds: Tuple[int, int],
+    normalize_height: bool = True,
+) -> npt.NDArray[np.floating]:
     """Generate spike-triggered traces of a defined length from a signal trace and known peak
     indices
-    
+
     Args:
         trace: Signal trace
         peak_indices: Indices of peaks in trace
@@ -625,9 +688,7 @@ def get_sta(
     use_median=False,
 ):
     """Generate spike-triggered average from given reference indices (peaks or stimuli)"""
-    spike_traces = get_spike_traces(
-        trace, peak_indices, bounds, normalize_height
-    )
+    spike_traces = get_spike_traces(trace, peak_indices, bounds, normalize_height)
 
     if len(peak_indices) == 0:
         sta = np.nan * np.ones(before + after)
@@ -700,7 +761,7 @@ def spike_match_to_kernel(
 
 def analyze_sta(
     trace,
-    peak_indices, 
+    peak_indices,
     bounds,
     f_s=1,
     normalize_height=True,
@@ -708,9 +769,7 @@ def analyze_sta(
 ):
     """Generate spike-triggered average from trace and indices of peaks, as well as associated statistics"""
 
-    spike_traces = get_spike_traces(
-        trace, peak_indices, bounds, normalize_height
-    )
+    spike_traces = get_spike_traces(trace, peak_indices, bounds, normalize_height)
 
     if len(peak_indices) == 0:
         sta = np.nan * np.ones(bounds[0] + bounds[1])
@@ -723,12 +782,9 @@ def analyze_sta(
     return sta, ststd, sta_stats
 
 
-def get_peak_statistics(
-    df,
-    min_peaks=6
-) -> pd.Series:
+def get_peak_statistics(df, min_peaks=6) -> pd.Series:
     """Generate statistics on a set of detected peaks
-    
+
     Args:
         df: DataFrame containing peak information
         min_peaks: Minimum number of peaks required to calculate standard deviation
@@ -1077,7 +1133,7 @@ class TimelapseArrayExperiment:
         baseline_start=0,
         baseline_duration=3000,
         auto_prom_scale=0.3,
-        **peak_detect_params
+        **peak_detect_params,
     ):
         """Apply scipy detect_peaks on all ROIs and"""
         dfs = []
@@ -1111,14 +1167,14 @@ class TimelapseArrayExperiment:
                         self.dFF[roi, :],
                         prominence=noise_level * auto_prom_scale,
                         f_s=self.f_s,
-                        **peak_detect_params
+                        **peak_detect_params,
                     )
                 else:
                     df = analyze_peaks(
                         self.dFF[roi, :],
                         prominence=prominence,
                         f_s=self.f_s,
-                        **peak_detect_params
+                        **peak_detect_params,
                     )
             except Exception as e:
                 print("ROI: %d" % roi)
@@ -1152,7 +1208,7 @@ class TimelapseArrayExperiment:
         height: Union[float, None] = None,
         overlap: float = 0.5,
         isi_stat_min_peaks: int = 7,
-        sta_bounds: Union[Tuple[int, int], None] = None
+        sta_bounds: Union[Tuple[int, int], None] = None,
     ) -> Tuple[pd.DataFrame, Union[Dict, None], Union[Dict, None]]:
         """Get ISI statistics averaged over a moving window
 
@@ -1168,7 +1224,7 @@ class TimelapseArrayExperiment:
                 dataframe containing ISI statistics per time window
                 dictionaries of average and standard deviation of spike-triggered dFF traces per
                     time window, keyed by embryo
-        
+
         """
         if self.peaks_data is None:
             raise AttributeError("peaks_data not defined. Run analyze_peaks() first")
@@ -1203,9 +1259,11 @@ class TimelapseArrayExperiment:
 
             peak_indices = np.array(peak_data["peak_idx"])
             window_indices = np.arange(
-                0, self.dFF.shape[1] - window_size, step=int(window_size - overlap * window_size)
+                0,
+                self.dFF.shape[1] - window_size,
+                step=int(window_size - overlap * window_size),
             )
-            
+
             if sta_bounds:
                 sta = np.zeros((len(window_indices), sta_bounds[0] + sta_bounds[1]))
                 ststd = np.zeros((len(window_indices), sta_bounds[0] + sta_bounds[1]))
@@ -1259,7 +1317,9 @@ class TimelapseArrayExperiment:
                 # Optionally collect statistics on spike-triggered average
                 if sta is not None and ststd is not None:
                     locs = np.array(masked_peak_df["peak_idx"])
-                    roi_sta, roi_ststd, roi_sta_stats = analyze_sta(self.dFF[roi], locs, sta_bounds)
+                    roi_sta, roi_ststd, roi_sta_stats = analyze_sta(
+                        self.dFF[roi], locs, sta_bounds
+                    )
                     sta[wi_idx, :] = roi_sta
                     ststd[wi_idx, :] = roi_ststd
                     roi_spike_stats = roi_spike_stats.append(roi_sta_stats)
@@ -1346,7 +1406,7 @@ class TimelapseArrayExperiment:
             ax.set_title(f"ROI {roi}")
             if x_lim:
                 ax.set_xlim(x_lim)
-        
+
         axs[-1].set_xlabel(f"Time ({time})")
         plt.tight_layout()
         return fig1, axs
@@ -1645,8 +1705,7 @@ class TimelapseArrayExperiment:
         return t, timeseries_start
 
     def _find_segment_edges(self):
-        """ Find the edges of each segment of missing data in the time series
-        """
+        """Find the edges of each segment of missing data in the time series"""
         if self.missing_data is None:
             raise AttributeError("Run load_traces() first")
         missing_edges = self.missing_data[1:] - self.missing_data[:-1]
