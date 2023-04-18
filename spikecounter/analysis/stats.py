@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numpy import typing as npt
 from typing import Tuple, Optional, Union, List, Dict, Any, Callable, Collection
+from collections.abc import Sequence
 
 
 def ks_window(data, window, overlap=0.5):
@@ -297,7 +298,7 @@ def denoise_svd(
     """SVD a data matrix and reconstruct using the first n singular components
 
     Optional filtering of principal components based on skewness.
-    
+
     Args:
         data_matrix: Data matrix to denoise
         n_pcs: Number of principal components to use
@@ -307,15 +308,34 @@ def denoise_svd(
         Denoised data matrix
     """
     u, s, v = randomized_svd(data_matrix, n_components=n_initial_components)
+    skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
+    use_pcs = use_pcs & (skw > skewness_threshold)
 
     use_pcs = np.zeros_like(s, dtype=bool)
     use_pcs[:n_pcs] = True
 
-    skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
-    use_pcs = use_pcs & (skw > skewness_threshold)
-
     denoised = u[:, use_pcs] @ np.diag(s[use_pcs]) @ v[use_pcs, :]
     return denoised
+
+
+def reconstruct_svd(
+    u: npt.NDArray[np.floating],
+    s: npt.NDArray[np.floating],
+    v: npt.NDArray[np.floating],
+    use_pcs: Sequence[int],
+) -> npt.NDArray[np.floating]:
+    """Reconstruct a data matrix from selected SVD components
+
+    Args:
+        u: Left singular vectors
+        s: Singular values
+        v: Right singular vectors
+        use_pcs: Indices of singular components to use
+    Returns:
+        Reconstructed data matrix
+    """
+    reconstructed = u[:, use_pcs] @ np.diag(s[use_pcs]) @ v[use_pcs, :]
+    return reconstructed
 
 
 def trajectory_variability_kde(x, y, nsamples=100, bandwidth=1, pady=0):
@@ -366,7 +386,7 @@ def multi_regress(data_matrix, traces, regress_dc=True):
 
     if regress_dc:
         I = np.concatenate(
-            [np.ones((1, data_matrix.shape[0])), tr - tr.mean(axis=1)[:,None]], axis=0
+            [np.ones((1, data_matrix.shape[0])), tr - tr.mean(axis=1)[:, None]], axis=0
         )
     else:
         I = tr

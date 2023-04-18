@@ -78,8 +78,12 @@ def extract_background_traces(
 ) -> npt.NDArray: ...
 
 def get_image_dFF(
-    img: npt.NDArray,
+    img: npt.NDArray[Union[np.floating, np.integer]],
     baseline_percentile: float = 10,
     t_range: Tuple[int, int] = (0, -1),
     invert: bool = False,
-): ...
+):...
+
+def extract_cropped_region_image(
+    intensity: npt.NDArray, global_coords: Union[npt.NDArray, Tuple[int, int]]
+) -> npt.NDArray:...

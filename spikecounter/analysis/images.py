@@ -402,69 +402,6 @@ def extract_bbox_images(
     return cropped_images
 
 
-def plot_pca_data(
-    pca: PCA,
-    raw_data: npt.NDArray,
-    gc: Union[npt.NDArray, Tuple[int, int]],
-    n_components: int = 5,
-    pc_title: Optional[Callable[..., str]] = None,
-    mode="temporal",
-) -> None:
-    """Show spatial principal components of a video and the corresponding
-    temporal trace (dot product).
-
-    Args:
-        pca: sklearn.decomposition.PCA object
-        raw_data: 2D array of raw data (timepoints x pixels)
-        gc: 2D array of global coordinates (pixels x 2) OR tuple of (rows, cols) for the shape of
-            the image.
-        n_components: number of principal components to display.
-        pc_title: function to generate a title for each principal component. If None, the default
-            title is used.
-        mode: "temporal" or "spatial". If "temporal", the spatial principal components are
-            displayed as images. If "spatial", the temporal principal components are displayed as
-            traces.
-    Returns:
-        None
-    Raises:
-        ValueError: if mode is not "temporal" or "spatial"
-    """
-
-    if pc_title is None:
-
-        def pct(j, *args):
-            return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
-
-        pc_title = pct
-    if mode == "temporal":
-        for i in range(n_components):
-            _, axs = plt.subplots(
-                1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [1, 3]}
-            )
-            axs = np.array(axs).ravel()
-            comp = pca.components_[i]
-            cropped_region_image = extract_cropped_region_image(comp, gc)
-            dot_trace = np.matmul(raw_data, comp)
-            axs[0].imshow(cropped_region_image)
-            axs[0].set_title(pc_title(i, comp))
-            axs[1].set_title("PC Value")
-            axs[1].plot(dot_trace)
-    elif mode == "spatial":
-        for i in range(n_components):
-            _, axs = plt.subplots(
-                1, 2, figsize=(12, 6), gridspec_kw={"width_ratios": [3, 1]}
-            )
-            axs = np.array(axs).ravel()
-            comp = pca.components_[i]
-            axs[0].plot(comp)
-            axs[0].set_title(pc_title(i, comp))
-            dot_trace = np.matmul(raw_data, comp)
-            cropped_region_image = extract_cropped_region_image(dot_trace, gc)
-            axs[1].imshow(cropped_region_image)
-    else:
-        raise ValueError("mode must be 'temporal' or 'spatial'")
-
-
 def extract_roi_traces(
     img: npt.NDArray, label_mask: npt.NDArray[np.unsignedinteger]
 ) -> npt.NDArray:
@@ -520,7 +457,7 @@ def background_subtract(img: npt.NDArray, dark_level: int = 100) -> npt.NDArray:
 
 
 def extract_background_traces(
-    img: npt.NDArray, mode: Union[str, Collection[str]] = "all"
+    img: npt.NDArray, mode: Union[str, Collection[str]] = "all", corner_divs: int = 5
 ) -> npt.NDArray:
     """Use one or more of several heuristics to find possible sources of background
 
@@ -528,6 +465,8 @@ def extract_background_traces(
         img: 3D array of raw image data (timepoints x pixels x pixels)
         mode: "all" or a list of strings. If "all", use all available methods. Otherwise, use only
             the methods specified in the list.
+        corner_divs: number of divisions to make when calculating the mean of the corners
+            of the image
     Returns:
         background_traces: 2D array of background traces (timepoints x methods)
     """
@@ -554,9 +493,8 @@ def extract_background_traces(
         elif m == "corners":
             mean_img = img.mean(axis=0)
             tr = []
-            divs = 5
-            div0 = mean_img.shape[0] // divs
-            div1 = mean_img.shape[1] // divs
+            div0 = mean_img.shape[0] // corner_divs
+            div1 = mean_img.shape[1] // corner_divs
             mask = np.zeros(mean_img.shape, dtype=bool)
             mask[:div0, :div1] = True
             tr.append(extract_mask_trace(img, mask))
@@ -1163,8 +1101,8 @@ def correct_photobleach(
             method="monoexp",
             return_params=True,
             invert=invert,
-            a=0.1,
-            b=5e-4,
+            a=5,
+            b=2,
         )
         dur = img.shape[0]
         amplitude_window_idx = int(amplitude_window / dt)
@@ -1241,7 +1179,7 @@ def correct_photobleach(
 
 
 def get_image_dFF(
-    img: npt.NDArray,
+    img: npt.NDArray[Union[np.floating, np.integer]],
     baseline_percentile: float = 10,
     t_range: Tuple[int, int] = (0, -1),
     invert: bool = False,
@@ -1259,7 +1197,7 @@ def get_image_dFF(
     if invert:
         img = 2*np.mean(img, axis=0) - img
     baseline = np.percentile(img[t_range[0] : t_range[1]], baseline_percentile, axis=0)
-    dFF = img / baseline
+    dFF = (img / baseline).astype(np.float32)
     return dFF
 
 
@@ -1425,7 +1363,7 @@ def downsample_video(
                 [1, 2],
             )
             di = smoothed[:, ::downsample_factor, ::downsample_factor]
-        elif aa == "gaussian":
+        elif aa == "gaussian" and raw_img.dtype != np.bool_:
             smoothed: npt.NDArray = ndimage.gaussian_filter(
                 raw_img, [0, (downsample_factor - 1) / 2, (downsample_factor - 1) / 2]
             )
@@ -1523,11 +1461,6 @@ def image_to_sta(
     """Convert raw image into spike triggered average"""
     if savedir is not None:
         os.makedirs(savedir, exist_ok=True)
-
-    if plot:
-        fig1, axes = plt.subplots(2, 2, figsize=(10, 10))
-        axes = axes.ravel()
-
     # Generate mask if not provided
     mean_img = raw_img.mean(axis=0)
     if mask is None:
@@ -1536,8 +1469,6 @@ def image_to_sta(
         mask = morphology.binary_closing(
             mask, footprint=np.ones((kernel_size, kernel_size))
         )
-    _ = visualize.display_roi_overlay(mean_img, mask.astype(int), ax=axes[0])
-
     raw_trace = extract_mask_trace(raw_img, np.tile(mask, (raw_img.shape[0], 1, 1)))
 
     # convert to DF/F
@@ -1560,16 +1491,24 @@ def image_to_sta(
         )
 
     dFF_mean = extract_mask_trace(dFF_img, mask=np.tile(mask, (dFF_img.shape[0], 1, 1)))
-    axes[1].plot(np.arange(dFF_img.shape[0]) / fs, dFF_mean, color="C2")
+
 
     if plot:
-        axes[1].plot(np.arange(dFF_img.shape[0]) / fs, dFF_mean)
-        axes[1].plot(pks / fs, dFF_mean[pks], "rx")
-        axes[1].set_xlabel("Time (s)")
-        axes[1].set_ylabel(r"$F/F_0$")
-        tx = axes[1].twinx()
+        fig1, axs = plt.subplots(2, 2, figsize=(10, 10))
+        axs = axs.ravel()
+        # Show mean image and mask used to aquire trace
+        _ = visualize.display_roi_overlay(mean_img, mask.astype(int), ax=axs[0])
+
+        # Plot mask trace of dff and raw
+        axs[1].plot(np.arange(dFF_img.shape[0]) / fs, dFF_mean, color="C2")
+        axs[1].plot(pks / fs, dFF_mean[pks], "rx")
+        axs[1].set_xlabel("Time (s)")
+        axs[1].set_ylabel(r"$F/F_0$")
+        tx = axs[1].twinx()
         tx.plot(np.arange(dFF_img.shape[0]) / fs, raw_trace, color="C1")
         tx.set_ylabel("Mean counts")
+    else:
+        axs = None
 
     # Automatically determine bounds for spike-triggered average
     if sta_bounds == "auto":
@@ -1591,27 +1530,29 @@ def image_to_sta(
         smoothed = spl(np.arange(len(mean_trace)))
         smoothed_dfdt = spl.derivative()(np.arange(len(mean_trace)))
         # Find the first minimum before and the first minimum after the real spike-triggered peak
-        if plot:
-            axes[3].plot(mean_trace)
-            axes[3].plot(smoothed, color="C1")
-            tx = axes[3].twinx()
-            tx.plot(smoothed_dfdt, color="C2")
-            tx.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
         try:
             minima_left = np.argwhere((smoothed_dfdt < 0)).ravel()
             minima_right = np.argwhere((smoothed_dfdt > 0)).ravel()
             # calculate number of samples to take before and after the peak
             b1 = pks[-1] - minima_left[minima_left < pks[-1]][-1] + offset
             b2 = minima_right[minima_right > pks[-1]][0] - pks[-1] + offset
+
+            if plot:
+                assert axs is not None
+                axs[3].plot(mean_trace)
+                axs[3].plot(smoothed, color="C1")
+                tx = axs[3].twinx()
+                tx.plot(smoothed_dfdt, color="C2")
+                tx.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
+
+                axs[3].plot(
+                    [pks[-1] - b1, pks[-1], pks[-1] + b2],
+                    mean_trace[[pks[-1] - b1, pks[-1], pks[-1] + b2]],
+                    "rx",
+                )
+
         except Exception:
             return mean_trace
-
-        if plot:
-            axes[3].plot(
-                [pks[-1] - b1, pks[-1], pks[-1] + b2],
-                mean_trace[[pks[-1] - b1, pks[-1], pks[-1] + b2]],
-                "rx",
-            )
         sta_bounds = (b1, b2)
 
     # Collect spike traces according to bounds
@@ -1619,6 +1560,14 @@ def image_to_sta(
         dFF_mean, pks, sta_bounds, f_s=fs, normalize_height=normalize_height
     )
 
+    if plot:
+        axs[2].plot(
+            (np.arange(sta_bounds[0] + sta_bounds[1]) - sta_bounds[0]) / fs, sta_trace
+        )
+        axs[2].set_xlabel("Time (s)")
+        axs[2].set_ylabel(r"$F/F_0$")
+        axs[2].set_title(f"STA taps: {sta_bounds[0]} + {sta_bounds[1]}")
+        plt.tight_layout()
     # Get STA video
 
     sta, spike_images = spike_triggered_average_video(
@@ -1629,14 +1578,6 @@ def image_to_sta(
         full_output=full_output,
     )
 
-    if plot:
-        axes[2].plot(
-            (np.arange(sta_bounds[0] + sta_bounds[1]) - sta_bounds[0]) / fs, sta_trace
-        )
-        axes[2].set_xlabel("Time (s)")
-        axes[2].set_ylabel(r"$F/F_0$")
-        axes[2].set_title("STA taps: %d + %d" % (sta_bounds[0], sta_bounds[1]))
-        plt.tight_layout()
     if savedir:
         skio.imsave(os.path.join(savedir, "sta.tif"), sta)
         if plot:
@@ -1862,7 +1803,7 @@ def get_heart_mask(
     valid_components = valid_krt & valid_size
 
     if plot:
-        plot_pca_data(
+        visualize.plot_pca_data(
             pca,
             datmatrix,
             img.shape[1:],

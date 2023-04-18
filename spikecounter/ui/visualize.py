@@ -1,4 +1,5 @@
-from typing import Union, Tuple, List, Any, Sequence, Collection
+""" Functions for visualizing data """
+from typing import Union, Tuple, List, Any, Sequence, Collection, Optional, Callable
 
 import matplotlib as mpl
 from matplotlib import axes, figure, patches
@@ -7,6 +8,7 @@ from skimage.measure import regionprops
 import numpy as np
 from numpy import typing as npt
 import pandas as pd
+from sklearn.decomposition import PCA
 from ..analysis import images
 
 
@@ -535,3 +537,76 @@ def plot_heatmap(df, value, index, column, ax, norm="lin", cax="auto"):
     elif cax is not None:
         cbar = plt.colorbar(im, cax=cax)
     return ax, im, cbar
+
+
+def plot_pca_data(
+    pca: Union[PCA, npt.NDArray],
+    raw_data: npt.NDArray,
+    gc: Union[npt.NDArray, Tuple[int, int]],
+    n_components: int = 5,
+    pc_title: Optional[Callable[..., str]] = None,
+    mode: str ="temporal",
+    figsize: Tuple[float, float] = (12,6)
+) -> None:
+    """Show spatial principal components of a video and the corresponding
+    temporal trace (dot product).
+
+    Args:
+        pca: sklearn.decomposition.PCA object or array of principal components.
+        raw_data: 2D array of raw data (timepoints x pixels)
+        gc: 2D array of global coordinates (pixels x 2) OR tuple of (rows, cols) for the shape of
+            the image.
+        n_components: number of principal components to display.
+        pc_title: function to generate a title for each principal component. If None, the default
+            title is used.
+        mode: "temporal" or "spatial". If "temporal", the spatial principal components are
+            displayed as images. If "spatial", the temporal principal components are displayed as
+            traces.
+        figsize: figure size for the plot.
+    Returns:
+        None
+    Raises:
+        ValueError: if mode is not "temporal" or "spatial"
+    """
+    
+    if isinstance(pca, PCA):
+        components = pca.components_
+        if pc_title is None:
+            def pct(j, *args):
+                return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
+            pc_title = pct
+    else:
+        components = pca
+        if pc_title is None:
+            def pct(j, *args):
+                return f"PC {j+1}"
+            pc_title = pct
+    if mode == "temporal":
+        for i in range(n_components):
+            _, axs = plt.subplots(
+                1, 2, figsize=figsize, gridspec_kw={"width_ratios": [1, 3]}
+            )
+            axs = np.array(axs).ravel()
+            comp = components[i]
+            cropped_region_image = images.extract_cropped_region_image(comp, gc)
+            dot_trace = np.matmul(raw_data, comp)
+            pc_img = axs[0].imshow(cropped_region_image)
+            axs[0].set_title(pc_title(i, comp))
+            axs[1].set_title("PC Value")
+            axs[1].plot(dot_trace)
+            plt.colorbar(pc_img)
+    elif mode == "spatial":
+        for i in range(n_components):
+            _, axs = plt.subplots(
+                1, 2, figsize=figsize, gridspec_kw={"width_ratios": [3, 1]}
+            )
+            axs = np.array(axs).ravel()
+            comp = components[i]
+            axs[0].plot(comp)
+            axs[0].set_title(pc_title(i, comp))
+            dot_trace = np.matmul(raw_data, comp)
+            cropped_region_image = images.extract_cropped_region_image(dot_trace, gc)
+            pc_img = axs[1].imshow(cropped_region_image)
+            plt.colorbar(pc_img)
+    else:
+        raise ValueError("mode must be 'temporal' or 'spatial'")
