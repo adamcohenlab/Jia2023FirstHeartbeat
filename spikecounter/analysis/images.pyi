@@ -87,3 +87,17 @@ def get_image_dFF(
 def extract_cropped_region_image(
     intensity: npt.NDArray, global_coords: Union[npt.NDArray, Tuple[int, int]]
 ) -> npt.NDArray:...
+
+def correct_photobleach(
+    img: npt.NDArray[Union[np.floating, np.integer]],
+    mask: Union[npt.NDArray[np.bool_], None] = None,
+    method: str = "localmin",
+    nsamps: int = 51,
+    amplitude_window: float = 0.5,
+    dt: float = 0.01,
+    invert: bool = False,
+    return_params: bool = False,
+) -> Union[
+    npt.NDArray[np.floating],
+    Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]],
+]: ...

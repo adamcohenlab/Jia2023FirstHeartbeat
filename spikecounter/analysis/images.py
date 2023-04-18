@@ -1067,7 +1067,29 @@ def correct_photobleach(
     npt.NDArray[np.floating],
     Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]],
 ]:
-    """Perform photobleach correction on each pixel in an image"""
+    """Perform photobleach correction on each pixel in an image
+    
+    Args:
+        img: 3D array of fluorescence traces (n_frames, n_rows, n_cols)
+        mask: 2D array of pixels to select for generating photobleaching trace
+        method: Method to use for photobleach correction. Options are:
+            "linear": Perform linear fit to each pixel independently over time
+            "localmin": Correct against moving minimum of masked average
+            "monoexp": Correct against monoexponential fit to masked average
+            "biexp": Correct against biexponential fit to masked average
+            "decorrelate": Remove masked average over time
+        nsamps: Number of samples to use for localmin method
+        amplitude_window: Portion of trace (in real time) to use exponential amplitude
+            estimation (biexp and monoexp methods)
+        dt: Time step for exponential fit (biexp and monoexp methods)
+        invert: Invert the image before performing photobleach correction (e.g. for downward-going
+            spikes)
+        return_params: Return parameters of exponential fit (biexp and monoexp methods)
+    Returns:
+        corrected_img: 3D array of corrected fluorescence traces
+        (optional) photobleach_trace: 1D array of photobleach trace
+        (optional) params: 3D array of exponential fit parameters
+    """
     if method == "linear":
         # Perform linear fit to each pixel independently over time
         pixel_traces = img.reshape(img.shape[0], -1)
@@ -1085,25 +1107,43 @@ def correct_photobleach(
         else:
             raw_img = img
         mean_trace = extract_mask_trace(raw_img, mask)
+        # Get photobleaching trace for the average of the masked area
         _, pbleach, _ = traces.correct_photobleach(
-            mean_trace, method=method, nsamps=nsamps, return_params=True
+            mean_trace, method=method, nsamps=nsamps
         )
+        # Divide each pixel by the photobleaching trace (assuming each pixel has the same 
+        # photobleaching profile)
         corrected_img = np.divide(raw_img, pbleach[:, np.newaxis, np.newaxis])
         if return_params:
             return corrected_img, pbleach, np.array([])
 
-    elif method == "monoexp":
-        # Correct against a monoexponential decay of fluorescence
+    elif method == "monoexp" or method == "biexp":
+        # Correct against a exponential decay of fluorescence
         mean_trace = extract_mask_trace(img, mask)
         background_level = np.percentile(img, 5, axis=0)
-        _, pbleach, params = traces.correct_photobleach(
-            mean_trace,
-            method="monoexp",
-            return_params=True,
-            invert=invert,
-            a=5,
-            b=2,
-        )
+        
+        # Get photobleaching trace for the average of the masked area
+        if method == "monoexp":
+            _, pbleach, params = traces.correct_photobleach(
+                mean_trace,
+                method="monoexp",
+                return_params=True,
+                invert=invert,
+                a=5,
+                b=2,
+            )
+        elif method == "biexp":
+            _, pbleach, params = traces.correct_photobleach(
+                mean_trace,
+                method="biexp",
+                return_params=True,
+                invert=invert,
+                a=5,
+                b=2,
+            )
+        # It's too computationally expensive to fit a monoexponential decay to each pixel, so this
+        # is a way to roughly estimate the amplitude of the decay. We use extreme values observed in
+        # the trace to estimate the amplitude, and then apply a median filter to smooth it out.
         dur = img.shape[0]
         amplitude_window_idx = int(amplitude_window / dt)
         max_val = np.median(img[:amplitude_window_idx], axis=0)
@@ -1113,43 +1153,8 @@ def correct_photobleach(
         amplitude = np.maximum(amplitude, 0)
         amplitude = filters.median(amplitude, selem=morphology.disk(7))
         amplitude[amplitude / params[0] * pbleach[-1] > background_level] = 0
-        # pctile = np.percentile(amplitude, 99)
-        # amplitude[amplitude > pctile] = pctile
 
-        corrected_img = (
-            img
-            - np.divide(
-                amplitude,
-                params[0],
-                out=np.zeros_like(amplitude),
-                where=params[0] > 5e-2,
-            )
-            * pbleach[:, np.newaxis, np.newaxis]
-        )
-        # if invert:
-        #     corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
-
-        if return_params:
-            return corrected_img, amplitude, params
-    elif method == "biexp":
-        mean_trace = extract_mask_trace(img, mask)
-        background_level = np.percentile(img, 5)
-
-        _, pbleach, params = traces.correct_photobleach(
-            mean_trace, method="biexp", return_params=True, invert=invert
-        )
-        dur = img.shape[0]
-        amplitude_window_idx = int(amplitude_window / dt)
-
-        max_val = np.median(img[:amplitude_window_idx], axis=0)
-        min_val = np.median(img[-amplitude_window_idx:], axis=0)
-        amplitude = (max_val - min_val) / (1 - np.exp(params[1] * dur))
-        amplitude[~np.isfinite(amplitude)] = 0
-        amplitude = np.maximum(amplitude, 0)
-        amplitude = filters.median(amplitude, selem=morphology.disk(7))
-        pctile = np.percentile(amplitude, 99)
-        amplitude[amplitude > pctile] = pctile
-
+        # Correct each pixel by the photobleaching trace (only if the amplitude is large enough)
         corrected_img = (
             img
             - np.divide(
@@ -1161,13 +1166,10 @@ def correct_photobleach(
             * pbleach[:, np.newaxis, np.newaxis]
         )
 
-        # if invert:
-        #     corrected_img = 2*np.mean(corrected_img, axis=0) - corrected_img
         if return_params:
             return corrected_img, amplitude, params
     elif method == "decorrelate":
-        # Zero the mean over time
-        # mean_img = img.mean(axis=0)
+        # Perform least-squares regression to remove the spatial mean over time
         mean_trace = img.mean(axis=(1, 2))
         corrected_img = regress_video(img, mean_trace)
         if return_params:
