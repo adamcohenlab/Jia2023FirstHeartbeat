@@ -26,7 +26,7 @@ import re
 import pandas as pd
 import mat73
 
-def nans(shape: Union[Sequence[int], int], dtype: Union[Type, npt.DTypeLike] = float) -> npt.NDArray:
+def nans(shape: Union[Sequence[int], int], dtype: Union[Type, npt.DTypeLike] = np.float32) -> npt.NDArray:
     """create an array of nans with a given shape
 
     Args:
@@ -573,13 +573,32 @@ def display_zstack(stack, z=0, c="all", markers=[], pct_cutoffs=[5, 95], cmap=No
         view_image, z=(0, st.shape[0] - 1), c=["all"] + list(np.arange(st.shape[-1]))
     )
 
+def get_frame_times(
+    matdata: Dict[str, Any]
+) -> np.ndarray:
+    """Get frame times in seconds from DAQ data.
+    Args:
+        matdata: Dictionary of DAQ data (derived using load_video_metadata).
+    Returns:
+        Array of frame times in seconds.
+    """
+    rising_edges = np.argwhere(np.diff(matdata["frame_counter"]) == 1).ravel()
+    return rising_edges / matdata["clock_rate"]
+
 
 def traces_to_dict(
     matdata: Dict[str, Any]
 ) -> Tuple[Dict[str, Any], npt.NDArray[np.floating]]:
-    """Extract traces from DAQ data, synchronize to camera frames, and return as a dictionary."""
+    """Extract traces from DAQ data, synchronize to camera frames, and return as a dictionary.
+    
+    Args:
+        matdata: Dictionary of DAQ data (derived using load_video_metadata).
+    Returns:
+        Dictionary of traces, and array of frame times in seconds.
+    """
     # Find daq indices where camera frames were acquired
     rising_edges = np.argwhere(np.diff(matdata["frame_counter"]) == 1).ravel()
+    t = rising_edges / matdata["clock_rate"]
     if isinstance(matdata["task_traces"], dict):
         trace_types = [matdata["task_traces"]]
     else:
@@ -612,7 +631,6 @@ def traces_to_dict(
                         dt_dict[traces["name"][i]][j] = np.max(
                             traces["values"][i][rising_edges[j - 1] : rising_edges[j]]
                         )
-    t = rising_edges / matdata["clock_rate"]
     return dt_dict, t
 
 

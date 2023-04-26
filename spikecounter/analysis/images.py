@@ -942,7 +942,11 @@ def remove_nans(
     kernel[kernel_size // 2, kernel_size // 2] = 0
     nans_removed = np.copy(img)
     nans_removed[np.isnan(img)] = ndimage.generic_filter(
-        img, np.nanmean, footprint=np.ones((kernel_size, kernel_size)), mode="nearest"
+        img,
+        np.nanmean,
+        footprint=np.ones((kernel_size, kernel_size)),
+        mode="constant",
+        cval=np.nan,
     )[np.isnan(img)]
     return nans_removed
 
@@ -1188,7 +1192,7 @@ def get_image_dFF(
     baseline_percentile: float = 10,
     t_range: Tuple[int, int] = (0, -1),
     invert: bool = False,
-):
+) -> npt.NDArray[np.floating]:
     """Convert a raw image into dF/F
 
     Args:
@@ -1201,8 +1205,8 @@ def get_image_dFF(
     """
     if invert:
         img = 2 * np.mean(img, axis=0) - img
-    baseline = np.percentile(img[t_range[0] : t_range[1]], baseline_percentile, axis=0)
-    dFF = (img / baseline).astype(np.float32)
+    baseline = np.percentile(img[t_range[0] : t_range[1]], baseline_percentile, axis=0).astype(np.float32)
+    dFF = img / baseline
     return dFF
 
 

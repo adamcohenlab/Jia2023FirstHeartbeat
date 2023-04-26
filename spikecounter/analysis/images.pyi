@@ -82,7 +82,7 @@ def get_image_dFF(
     baseline_percentile: float = 10,
     t_range: Tuple[int, int] = (0, -1),
     invert: bool = False,
-):...
+) -> npt.NDArray[np.floating]: ...
 
 def extract_cropped_region_image(
     intensity: npt.NDArray, global_coords: Union[npt.NDArray, Tuple[int, int]]
@@ -108,7 +108,7 @@ def extract_mask_trace(
 
 def spike_triggered_average_video(
     img: npt.NDArray[Union[np.floating, np.integer]],
-    peak_indices: npt.NDArray[Union[np.integer, np.bool_]],
+    peak_indices: npt.NDArray[np.integer],
     sta_bounds: Tuple[int, int],
     include_mask: Optional[npt.NDArray[np.bool_]] = None,
     normalize_height: bool = False,

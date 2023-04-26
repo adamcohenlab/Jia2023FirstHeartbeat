@@ -321,7 +321,9 @@ def reconstruct_svd(
     u: npt.NDArray[np.floating],
     s: npt.NDArray[np.floating],
     v: npt.NDArray[np.floating],
-    use_pcs: Union[Sequence[Union[int, bool]], npt.NDArray[Union[np.integer, np.bool_]]]
+    use_pcs: Union[
+        Sequence[Union[int, bool]], npt.NDArray[Union[np.integer, np.bool_]]
+    ],
 ) -> npt.NDArray[np.floating]:
     """Reconstruct a data matrix from selected SVD components
 
@@ -373,10 +375,19 @@ def trajectory_variability_kde(x, y, nsamples=100, bandwidth=1, pady=0):
     return x_samples, mean_y, std_y
 
 
-def multi_regress(data_matrix, traces, regress_dc=True):
-    """
-    data_matrix : t by x matrix
-    traces: n by t matrix
+def multi_regress(
+    data_matrix: npt.NDArray[Union[np.integer, np.floating]],
+    traces: npt.NDArray[Union[np.integer, np.floating]],
+    regress_dc: bool = True,
+) -> npt.NDArray[Union[np.integer, np.floating]]:
+    """Regress multiple traces from data matrix and return residuals
+
+    Args:
+        data_matrix: Data matrix
+        traces: Traces to regress
+        regress_dc: Whether to regress DC component
+    Returns:
+        Residuals
     """
     if len(traces.shape) == 1:
         tr = traces[np.newaxis, :]
@@ -386,19 +397,18 @@ def multi_regress(data_matrix, traces, regress_dc=True):
     if regress_dc:
         I = np.concatenate(
             [np.ones((1, data_matrix.shape[0])), tr - tr.mean(axis=1)[:, None]], axis=0
-        )
+        ).astype(np.float32)
     else:
-        I = tr
+        I = tr.astype(np.float32)
 
-    C = data_matrix.T @ I.T @ np.linalg.inv(I @ I.T)
-    resid = data_matrix - (C @ I).T
+    C = np.linalg.inv(I@ I.T) @ I @ data_matrix
+    resid = data_matrix - I.T @ C
 
     if regress_dc:
-        dc = np.outer(I[0, :], C[:, 0])
+        dc = np.outer(I[0, :], C[0, :])
     else:
         dc = np.zeros_like(data_matrix)
     return dc + resid
-
 
 def fit_sigmoid(xs, ys, fixed_amplitude=None):
     if fixed_amplitude:

@@ -586,7 +586,6 @@ def plot_pca_data(
                 n_components, 2, figsize=(single_figsize[0], single_figsize[1]*n_components),
                 gridspec_kw={"width_ratios": [1, 3]}
         )
-        axs = np.array(axs).ravel()
         for i in range(n_components):
             comp = components[i]
             cropped_region_image = images.extract_cropped_region_image(comp, gc)
@@ -602,7 +601,6 @@ def plot_pca_data(
             n_components, 2, figsize=(single_figsize[0], single_figsize[1]*n_components),
             gridspec_kw={"width_ratios": [3, 1]}
         )
-        axs = np.array(axs).ravel()
         for i in range(n_components):
             comp = components[i]
             axs[i,0].plot(comp)
