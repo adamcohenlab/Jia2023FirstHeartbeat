@@ -469,7 +469,7 @@ def final_analysis_plotting(
     ax1.vlines(t[pks], ymin, ymax, color="black")
     for pk in pks:
         ax1.fill_between(
-            np.arange(pk - 20, pk + 100) * mean_dt, ymin, ymax, color="gray", alpha=0.2
+            np.arange(pk - sta_before, pk + sta_after) * mean_dt, ymin, ymax, color="gray", alpha=0.2
         )
     ax1.set_xlabel("Time (s)")
     ax1.set_ylabel(r"Mean $\rho$" + f" ({window_size} frames)")
