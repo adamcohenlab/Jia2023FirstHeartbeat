@@ -39,8 +39,8 @@ parser.add_argument("--um_per_px", default=0.265 * 4, type=float)
 parser.add_argument("--hard_cutoff", default=0.005, type=float)
 parser.add_argument("--downsample_factor", default=16, type=int)
 parser.add_argument("--window_size", default=111, type=int)
-parser.add_argument("--sta_before", default=40, type=int)
-parser.add_argument("--sta_after", default=100, type=int)
+parser.add_argument("--sta_before_s", default=2, type=float)
+parser.add_argument("--sta_after_s", default=5, type=float)
 args = parser.parse_args()
 
 rootdir = Path(args.rootdir)
@@ -75,6 +75,8 @@ voltage_image, metadata = images.load_image(
 )
 assert metadata is not None
 mean_dt = np.mean(np.diff(utils.get_frame_times(metadata)))
+sta_before = int(args.sta_before_s / mean_dt)
+sta_after = int(args.sta_after_s / mean_dt)
 t = np.arange(voltage_image.shape[0]) * mean_dt
 
 logger.info("Regressing background from voltage imaging data")
@@ -227,10 +229,10 @@ if args.plot:
 
 logger.info("Generating triggered averages of videos and mean traces of active regions")
 ca_triggered_sta_ca, _ = images.spike_triggered_average_video(
-    ca_dFF, pks, (args.sta_before, args.sta_after)
+    ca_dFF, pks, (sta_before, sta_after)
 )
 ca_triggered_sta_v, _ = images.spike_triggered_average_video(
-    v_dFF, pks, (args.sta_before, args.sta_after)
+    v_dFF, pks, (sta_before, sta_after)
 )
 
 logger.info("Saving STA videos")
@@ -270,7 +272,7 @@ else:
 
 if args.plot:
     logger.info("Plotting results of triggered averaging analysis")
-    t_sta = np.arange(-args.sta_before, args.sta_after) * mean_dt
+    t_sta = np.arange(-sta_before, sta_after) * mean_dt
     fig1, axs = plt.subplots(3, 1, figsize=(5, 6))
     axs[0].plot(t_sta, mask_trace_sta_v)
     ax2 = axs[0].twinx()
@@ -312,8 +314,8 @@ def calculate_local_corrs(v_ravelled, ca_ravelled, ws):
     sum_kernel = np.ones((1, ws))
 
     # Pad the arrays and perform moving average
-    v_padded = np.pad(v_ravelled, ((0, 0), (ws // 2, ws // 2)), mode="reflect")
-    ca_padded = np.pad(ca_ravelled, ((0, 0), (ws // 2, ws // 2)), mode="reflect")
+    v_padded = np.pad(v_ravelled, ((0, 0), (ws // 2, ws // 2)), mode="wrap")
+    ca_padded = np.pad(ca_ravelled, ((0, 0), (ws // 2, ws // 2)), mode="wrap")
     v_ma = signal.convolve(v_padded, ma_kernel, mode="valid")
     ca_ma = signal.convolve(ca_padded, ma_kernel, mode="valid")
     v_sum = signal.convolve(v_padded, sum_kernel, mode="valid")
