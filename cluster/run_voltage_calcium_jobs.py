@@ -10,8 +10,8 @@ parser.add_argument("--um_per_px", default=0.265 * 4, type=float)
 parser.add_argument("--hard_cutoff", default=0.005, type=float)
 parser.add_argument("--downsample_factor", default=16, type=int)
 parser.add_argument("--window_size", default=111, type=int)
-parser.add_argument("--sta_before", default=40, type=int)
-parser.add_argument("--sta_after", default=100, type=int)
+parser.add_argument("--sta_before", default=2, type=float)
+parser.add_argument("--sta_after", default=5, type=float)
 
 
 args = parser.parse_args()
