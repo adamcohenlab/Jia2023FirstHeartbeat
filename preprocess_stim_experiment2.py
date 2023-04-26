@@ -109,11 +109,7 @@ else:
         output_folders["downsampled"]/f"{expt_name}.tif"
     )
 
-if args.pb_correct_method == "None":
-    logger.info("No photobleaching correction, downsampling only")
-    sys.exit()
-
-downsampled = downsampled.astype(float) - args.bg_const
+downsampled = downsampled.astype(np.float32) - args.bg_const
 
 if crosstalk_channel != "None":
     if trace_dict is None:
@@ -158,6 +154,9 @@ skio.imsave(
     output_folders["stim_frames_removed"]/f"{expt_name}.tif",
     stim_frames_removed,
 )
+if args.pb_correct_method == "None":
+    logger.info("No photobleaching correction, downsampling only")
+    sys.exit()
 
 logger.info(f"Correcting for photobleaching using method {args.pb_correct_method}")
 nsamps = (int(2 * fs) // 2) * 2 + 1
