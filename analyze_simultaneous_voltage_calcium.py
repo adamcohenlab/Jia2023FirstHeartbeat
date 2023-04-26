@@ -129,9 +129,8 @@ if args.plot:
         single_figsize=(12, 3),
         n_components=15,
     )
-    plt.savefig(analysis_dir / f"{file_name}_pca_denoising.tif", dpi=300)
-    plt.savefig(output_datadir / f"{file_name}_pca_denoising.tif", dpi=300)
-
+    plt.savefig(analysis_dir / f"{file_name}_voltage_pca.svg")
+    plt.savefig(output_datadir / f"{file_name}_voltage_pca.svg")
     plt.close("all")
 
 # Single PC looks weird, because it will just be a linear modulation of a fixed image. With multiple
