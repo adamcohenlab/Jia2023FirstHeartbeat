@@ -210,8 +210,8 @@ def correct_photobleach(
         def expon_soft_constraint(
             x: npt.NDArray[np.floating],
             constraint_function: Callable,
-            a: float = 1,
-            b: float = 1,
+            a: float = 5,
+            b: float = 2,
         ) -> npt.NDArray[np.floating]:
             """Single exponential decay function with soft constraint
 
@@ -285,7 +285,7 @@ def correct_photobleach(
             return corrected_trace, photobleach, popt
     elif method == "biexp":
 
-        def biexpon_soft_constraint(x, constraint_function, a=1, b=1):
+        def biexpon_soft_constraint(x, constraint_function, a=5, b=2):
             """ Similar function to expon_soft_constraint, but for a biexponential decay function
 
             Args:

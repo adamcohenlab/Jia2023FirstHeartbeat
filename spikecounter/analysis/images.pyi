@@ -101,3 +101,16 @@ def correct_photobleach(
     npt.NDArray[np.floating],
     Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]],
 ]: ...
+
+def extract_mask_trace(
+    img: npt.NDArray, mask: Optional[npt.NDArray[np.bool_]] = None
+) -> npt.NDArray: ...
+
+def spike_triggered_average_video(
+    img: npt.NDArray[Union[np.floating, np.integer]],
+    peak_indices: npt.NDArray[Union[np.integer, np.bool_]],
+    sta_bounds: Tuple[int, int],
+    include_mask: Optional[npt.NDArray[np.bool_]] = None,
+    normalize_height: bool = False,
+    full_output: bool = False,
+) -> Tuple[npt.NDArray[np.floating], Optional[npt.NDArray[np.floating]]]: ...

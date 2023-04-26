@@ -11,7 +11,8 @@ import importlib
 import os
 from os import PathLike
 from datetime import datetime
-from typing import Union, Tuple, Dict, Any, Callable, Generator
+from typing import Union, Tuple, Dict, Any, Callable, Generator, Type
+from collections.abc import Sequence
 
 import numpy as np
 from numpy import typing as npt
@@ -25,6 +26,28 @@ import re
 import pandas as pd
 import mat73
 
+def nans(shape: Union[Sequence[int], int], dtype: Union[Type, npt.DTypeLike] = float) -> npt.NDArray:
+    """create an array of nans with a given shape
+
+    Args:
+        shape: shape of the array
+        dtype: data type of the array
+    Returns:
+        array of nans
+    """
+    a = np.empty(shape, dtype)
+    a[:] = np.nan
+    return a
+
+def nans_like(array: npt.NDArray) -> npt.NDArray:
+    """create an array of nans with the same shape as another array
+
+    Args:
+        array: array to copy shape from
+    Returns:
+        array of nans
+    """
+    return nans(array.shape, array.dtype)
 
 def str2bool(v: str) -> bool:
     """convert string to boolean value

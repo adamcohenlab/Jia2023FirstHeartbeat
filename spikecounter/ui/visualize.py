@@ -546,8 +546,8 @@ def plot_pca_data(
     n_components: int = 5,
     pc_title: Optional[Callable[..., str]] = None,
     mode: str ="temporal",
-    figsize: Tuple[float, float] = (12,6)
-) -> None:
+    single_figsize: Tuple[float, float] = (12,6)
+) -> Tuple[figure.Figure, axes.Axes]:
     """Show spatial principal components of a video and the corresponding
     temporal trace (dot product).
 
@@ -562,7 +562,7 @@ def plot_pca_data(
         mode: "temporal" or "spatial". If "temporal", the spatial principal components are
             displayed as images. If "spatial", the temporal principal components are displayed as
             traces.
-        figsize: figure size for the plot.
+        single_figsize: figure size for one PC plot.
     Returns:
         None
     Raises:
@@ -582,31 +582,36 @@ def plot_pca_data(
                 return f"PC {j+1}"
             pc_title = pct
     if mode == "temporal":
+        fig1, axs = plt.subplots(
+                n_components, 2, figsize=(single_figsize[0], single_figsize[1]*n_components),
+                gridspec_kw={"width_ratios": [1, 3]}
+        )
+        axs = np.array(axs).ravel()
         for i in range(n_components):
-            _, axs = plt.subplots(
-                1, 2, figsize=figsize, gridspec_kw={"width_ratios": [1, 3]}
-            )
-            axs = np.array(axs).ravel()
             comp = components[i]
             cropped_region_image = images.extract_cropped_region_image(comp, gc)
             dot_trace = np.matmul(raw_data, comp)
-            pc_img = axs[0].imshow(cropped_region_image)
-            axs[0].set_title(pc_title(i, comp))
-            axs[1].set_title("PC Value")
-            axs[1].plot(dot_trace)
+            pc_img = axs[i,0].imshow(cropped_region_image)
+            axs[i,0].set_title(pc_title(i, comp))
+            axs[i,1].set_title("PC Value")
+            axs[i,1].plot(dot_trace)
+            axs[i,0].set_axis_off()
             plt.colorbar(pc_img)
     elif mode == "spatial":
+        fig1, axs = plt.subplots(
+            n_components, 2, figsize=(single_figsize[0], single_figsize[1]*n_components),
+            gridspec_kw={"width_ratios": [3, 1]}
+        )
+        axs = np.array(axs).ravel()
         for i in range(n_components):
-            _, axs = plt.subplots(
-                1, 2, figsize=figsize, gridspec_kw={"width_ratios": [3, 1]}
-            )
-            axs = np.array(axs).ravel()
             comp = components[i]
-            axs[0].plot(comp)
-            axs[0].set_title(pc_title(i, comp))
+            axs[i,0].plot(comp)
+            axs[i,0].set_title(pc_title(i, comp))
             dot_trace = np.matmul(raw_data, comp)
             cropped_region_image = images.extract_cropped_region_image(dot_trace, gc)
-            pc_img = axs[1].imshow(cropped_region_image)
+            pc_img = axs[i,1].imshow(cropped_region_image)
+            axs[i,1].set_axis_off()
             plt.colorbar(pc_img)
     else:
         raise ValueError("mode must be 'temporal' or 'spatial'")
+    return fig1, axs

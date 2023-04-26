@@ -16,6 +16,7 @@ from typing import (
     Optional,
     Iterable,
 )
+from collections.abc import Sequence
 import pickle
 import warnings
 
@@ -459,7 +460,7 @@ def background_subtract(img: npt.NDArray, dark_level: int = 100) -> npt.NDArray:
 def extract_background_traces(
     img: npt.NDArray, mode: Union[str, Collection[str]] = "all", corner_divs: int = 5
 ) -> npt.NDArray:
-    """Use one or more of several heuristics to find possible sources of background
+    """Use one or more of several heuristics to find possible sources of background.
 
     Args:
         img: 3D array of raw image data (timepoints x pixels x pixels)
@@ -471,7 +472,7 @@ def extract_background_traces(
         background_traces: 2D array of background traces (timepoints x methods)
     """
     if mode == "all":
-        mode = ["linear", "mean", "dark", "corners"]
+        mode = ["linear", "mean", "dark", "corners", "exp", "biexp"]
     background_traces: List[npt.NDArray] = []
 
     tr: Union[npt.NDArray, List[npt.NDArray]]
@@ -481,11 +482,11 @@ def extract_background_traces(
         elif m == "mean":
             tr = img.mean(axis=(1, 2))
         elif m in ("exponential", "exp"):
-            ## TBD: refactor exponential fit function in traces.py photobleach correction
-            tr = np.zeros(img.shape[0])
+            mean_trace = img.mean(axis=(1, 2))
+            _, tr, _ = traces.correct_photobleach(mean_trace, method="monoexp")
         elif m in ("biexponential", "biexp"):
-            ## TBD: refactor exponential fit function in traces.py photobleach correction
-            tr = np.zeros(img.shape[0])
+            mean_trace = img.mean(axis=(1, 2))
+            _, tr, _ = traces.correct_photobleach(mean_trace, method="biexp")
         elif m == "dark":
             mean_img = img.mean(axis=0)
             mask = mean_img < np.percentile(mean_img, 10)
@@ -617,7 +618,7 @@ def kernel_fit_single_trace(trace, kernel, minshift, maxshift, offset_width):
         beta = popt
         error_det = np.linalg.det(pcov)
     except Exception as e:
-        beta = np.nan * np.ones(4)
+        beta = utils.nans(4)
         error_det = np.nan
     beta = np.append(beta, error_det)
     return beta
@@ -669,7 +670,7 @@ def spline_fit_single_trace(
 
     # If no extrema are found within the trace, return NaNs
     if np.all(np.logical_or(extrema < 0, extrema > len(trace))):
-        beta = np.nan * np.ones(5)
+        beta = utils.nans(5)
         return beta, spl
 
     # Find position and value of the global maximum
@@ -730,7 +731,7 @@ def spline_fit_single_trace(
         else:
             max_deriv_interp = np.nan
     except IndexError:
-        beta = np.nan * np.ones(5)
+        beta = utils.nans(5)
         return beta, spl
 
     beta = np.array(
@@ -937,12 +938,12 @@ def remove_nans(
     Returns:
         nans_removed: 2D image with NaNs replaced
     """
-    convinput = np.copy(img)
-    convinput[np.isnan(img)] = 0
     kernel = np.ones((kernel_size, kernel_size)) / (kernel_size**2 - 1)
     kernel[kernel_size // 2, kernel_size // 2] = 0
     nans_removed = np.copy(img)
-    nans_removed[np.isnan(img)] = ndimage.convolve(convinput, kernel)[np.isnan(img)]
+    nans_removed[np.isnan(img)] = ndimage.generic_filter(
+        img, np.nanmean, footprint=np.ones((kernel_size, kernel_size)), mode="nearest"
+    )[np.isnan(img)]
     return nans_removed
 
 
@@ -978,10 +979,12 @@ def estimate_local_velocity(
         np.arange(activation_times.shape[0]), np.arange(activation_times.shape[1])
     )
     coords = np.array([Y.ravel(), X.ravel()]).T
-    t_smoothed = np.ones_like(activation_times) * np.nan
-    residuals = np.ones_like(activation_times) * np.nan
+    t_smoothed = np.empty_like(activation_times)
+    residuals = np.empty_like(activation_times)
+    t_smoothed = utils.nans_like(activation_times)
+    residuals = utils.nans_like(activation_times)
     # Note v = (v_y, v_x), consistent with row and column convention
-    v = np.ones((2, activation_times.shape[0], activation_times.shape[1])) * np.nan
+    v = utils.nans((2, activation_times.shape[0], activation_times.shape[1]))
     n_points_fit = np.zeros_like(activation_times)
 
     for y, x in coords:
@@ -1068,7 +1071,7 @@ def correct_photobleach(
     Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]],
 ]:
     """Perform photobleach correction on each pixel in an image
-    
+
     Args:
         img: 3D array of fluorescence traces (n_frames, n_rows, n_cols)
         mask: 2D array of pixels to select for generating photobleaching trace
@@ -1111,7 +1114,7 @@ def correct_photobleach(
         _, pbleach, _ = traces.correct_photobleach(
             mean_trace, method=method, nsamps=nsamps
         )
-        # Divide each pixel by the photobleaching trace (assuming each pixel has the same 
+        # Divide each pixel by the photobleaching trace (assuming each pixel has the same
         # photobleaching profile)
         corrected_img = np.divide(raw_img, pbleach[:, np.newaxis, np.newaxis])
         if return_params:
@@ -1121,7 +1124,7 @@ def correct_photobleach(
         # Correct against a exponential decay of fluorescence
         mean_trace = extract_mask_trace(img, mask)
         background_level = np.percentile(img, 5, axis=0)
-        
+
         # Get photobleaching trace for the average of the masked area
         if method == "monoexp":
             _, pbleach, params = traces.correct_photobleach(
@@ -1187,7 +1190,7 @@ def get_image_dFF(
     invert: bool = False,
 ):
     """Convert a raw image into dF/F
-    
+
     Args:
         img: 3D array of raw image data
         baseline_percentile: percentile of time range to use for baseline
@@ -1197,50 +1200,69 @@ def get_image_dFF(
         dFF: 3D array of dF/F image data
     """
     if invert:
-        img = 2*np.mean(img, axis=0) - img
+        img = 2 * np.mean(img, axis=0) - img
     baseline = np.percentile(img[t_range[0] : t_range[1]], baseline_percentile, axis=0)
     dFF = (img / baseline).astype(np.float32)
     return dFF
 
 
-def get_spike_videos(img, peak_indices, bounds, normalize_height=True):
-    """Generate spike-triggered videos of a defined length from a long video and peak indices"""
+def get_spike_videos(
+    img: npt.NDArray[Union[np.floating, np.integer]],
+    peak_indices: Union[npt.NDArray[np.integer], Sequence[int]],
+    bounds: Tuple[int, int],
+    normalize_height: bool = True,
+):
+    """Generate spike-triggered videos of a defined length from a recording and known peak indices
+
+    Args:
+        img: 3D array of raw image data (time x height x width)
+        peak_indices: indices of peaks to use for spike-triggered videos
+        bounds: time bounds to use for spike-triggered videos (before, after)
+        normalize_height: whether to normalize the height of each spike-triggered video
+    Returns:
+        spike_imgs: 4D array of spike-triggered videos (spike x time x height x width)
+    """
     before, after = bounds
-    spike_imgs = (
-        np.ones((len(peak_indices), before + after, img.shape[1], img.shape[2]))
-        * np.nan
+    spike_imgs = utils.nans(
+        (len(peak_indices), before + after, img.shape[1], img.shape[2])
     )
+
     for pk_idx, pk in enumerate(peak_indices):
-        before_pad_length = max(before - pk, 0)
-        after_pad_length = max(0, pk + after - img.shape[0])
-        spike_img = np.concatenate(
-            [
-                np.ones((before_pad_length, img.shape[1], img.shape[2])) * np.nan,
-                img[max(0, pk - before) : min(img.shape[0], pk + after), :, :],
-                np.ones((after_pad_length, img.shape[1], img.shape[2])) * np.nan,
-            ]
+        start, end = max(0, pk - before), min(img.shape[0], pk + after)
+        spike_img = np.pad(
+            img[start:end, :, :],
+            ((max(before - pk, 0), max(pk + after - img.shape[0], 0)), (0, 0), (0, 0)),
+            mode="constant",
+            constant_values=np.nan,
         )
         if normalize_height:
             spike_img /= np.nanpercentile(spike_img, 99)
-        try:
-            spike_imgs[pk_idx, :, :, :] = spike_img
-        except Exception as e:
-            print(spike_imgs.shape)
-            print(pk)
-            print(before_pad_length, after_pad_length)
-            raise e
+        spike_imgs[pk_idx] = spike_img
     return spike_imgs
 
 
 def spike_triggered_average_video(
-    img,
-    peak_indices,
-    sta_bounds,
-    include_mask=None,
-    normalize_height=False,
-    full_output=False,
-):
-    """Create a spike-triggered average video"""
+    img: npt.NDArray[Union[np.floating, np.integer]],
+    peak_indices: npt.NDArray[np.integer],
+    sta_bounds: Tuple[int, int],
+    include_mask: Optional[npt.NDArray[np.bool_]] = None,
+    normalize_height: bool = False,
+    full_output: bool = False,
+) -> Tuple[npt.NDArray[np.floating], Optional[npt.NDArray[np.floating]]]:
+    """Create a spike-triggered average video from a recording and known peak indices
+
+    Args:
+        img: 3D array of raw image data (time x height x width)
+        peak_indices: 1D array of peak indices
+        sta_bounds: time bounds for spike-triggered average (before, after)
+        include_mask: boolean mask of which peaks to include
+        normalize_height: whether to normalize the height of each event
+        full_output: whether to return the full output (including videos of each event)
+    Returns:
+        sta: 2D array of spike-triggered average image
+        spike_triggered_images: 4D array of spike-triggered images (if full_output=True)
+
+    """
     if include_mask is None:
         include_mask = np.ones_like(peak_indices, dtype=bool)
     spike_triggered_images = get_spike_videos(
@@ -1493,7 +1515,6 @@ def image_to_sta(
         )
 
     dFF_mean = extract_mask_trace(dFF_img, mask=np.tile(mask, (dFF_img.shape[0], 1, 1)))
-
 
     if plot:
         fig1, axs = plt.subplots(2, 2, figsize=(10, 10))

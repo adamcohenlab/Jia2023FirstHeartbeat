@@ -309,12 +309,11 @@ def denoise_svd(
     """
     u, s, v = randomized_svd(data_matrix, n_components=n_initial_components)
     skw = np.apply_along_axis(lambda x: stats.skew(np.abs(x)), 1, v)
-    use_pcs = use_pcs & (skw > skewness_threshold)
 
     use_pcs = np.zeros_like(s, dtype=bool)
     use_pcs[:n_pcs] = True
-
-    denoised = u[:, use_pcs] @ np.diag(s[use_pcs]) @ v[use_pcs, :]
+    use_pcs = use_pcs & (skw > skewness_threshold)
+    denoised = reconstruct_svd(u, s, v, use_pcs)
     return denoised
 
 
@@ -322,7 +321,7 @@ def reconstruct_svd(
     u: npt.NDArray[np.floating],
     s: npt.NDArray[np.floating],
     v: npt.NDArray[np.floating],
-    use_pcs: Sequence[int],
+    use_pcs: Union[Sequence[Union[int, bool]], npt.NDArray[Union[np.integer, np.bool_]]]
 ) -> npt.NDArray[np.floating]:
     """Reconstruct a data matrix from selected SVD components
 
