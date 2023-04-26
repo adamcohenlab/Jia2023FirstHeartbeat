@@ -261,8 +261,12 @@ mask_trace_sta_c_ma = np.convolve(
     mask_trace_sta_c_padded, np.ones(window_size) / window_size, mode="valid"
 )
 # Identify the lag between spike events of calcium and voltage traces
-sta_corr = signal.correlate(mask_trace_sta_v, mask_trace_sta_c)
-ca_lag = np.argmax(sta_corr) - mask_trace_sta_v.size + 1
+if len(pks) < 1:
+    logger.warning("No spikes detected in calcium trace")
+    ca_lag = 0
+else:
+    sta_corr = signal.correlate(mask_trace_sta_v, mask_trace_sta_c)
+    ca_lag = np.argmax(sta_corr) - mask_trace_sta_v.size + 1
 
 if args.plot:
     logger.info("Plotting results of triggered averaging analysis")
@@ -465,7 +469,7 @@ def final_analysis_plotting(
         ax1.fill_between(
             np.arange(pk - 20, pk + 100) * mean_dt, ymin, ymax, color="gray", alpha=0.2
         )
-    ax1.set_xlabel("Frame")
+    ax1.set_xlabel("Time (s)")
     ax1.set_ylabel(r"Mean $\rho$" + f" ({window_size} frames)")
     ax1.legend()
     plt.tight_layout()
@@ -515,7 +519,7 @@ corr_video = local_corrs.T.reshape(v_downsampled.shape).astype(np.float32)
 skio.imsave(output_datadir / f"{file_name}_corr_video_lag_corrected.tif", corr_video)
 os.makedirs(output_datadir / "final_plots_lag_corrected", exist_ok=True)
 final_analysis_plotting(
-    analysis_dir / "final_plots_lag_corrected",
+    output_datadir / "final_plots_lag_corrected",
     local_corrs,
     pks,
     mask_downsampled
