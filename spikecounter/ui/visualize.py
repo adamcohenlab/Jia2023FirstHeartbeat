@@ -595,7 +595,7 @@ def plot_pca_data(
             axs[i,1].set_title("PC Value")
             axs[i,1].plot(dot_trace)
             axs[i,0].set_axis_off()
-            plt.colorbar(pc_img)
+            plt.colorbar(pc_img, ax=axs[i,0])
     elif mode == "spatial":
         fig1, axs = plt.subplots(
             n_components, 2, figsize=(single_figsize[0], single_figsize[1]*n_components),
@@ -609,7 +609,7 @@ def plot_pca_data(
             cropped_region_image = images.extract_cropped_region_image(dot_trace, gc)
             pc_img = axs[i,1].imshow(cropped_region_image)
             axs[i,1].set_axis_off()
-            plt.colorbar(pc_img)
+            plt.colorbar(pc_img, ax=axs[i,1])
     else:
         raise ValueError("mode must be 'temporal' or 'spatial'")
     return fig1, axs
