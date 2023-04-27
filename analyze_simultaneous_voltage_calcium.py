@@ -49,7 +49,6 @@ rootdir = Path(args.rootdir)
 file_name = args.file_name
 um_per_px = args.um_per_px
 factor = args.downsample_factor
-window_size = args.window_size
 warnings.filterwarnings("once")
 matplotlib.use('Agg')
 plt.style.use(Path(SPIKECOUNTER_PATH, "config", "bio_publications.mplstyle"))
@@ -397,9 +396,7 @@ def final_analysis_plotting(
     axs[1].set_xlim(0, local_corrs.shape[1] - 1)
     axs[1].set_xlabel("Time (s)")
     axs[1].set_ylabel("Pixel")
-
-
-    plt.savefig(output_path / "pixelwise_raster.tif", dpi=300)
+    plt.savefig(output_path / "pixelwise_raster.svg")
 
     # Plot an image (pixels x time) of the local correlation coefficients, sorted by whether there 
     # is calcium activity. Detected peaks are marked with black lines.
@@ -431,7 +428,38 @@ def final_analysis_plotting(
     axs[1].set_xlim(0, local_corrs.shape[1] - 1)
     axs[1].set_xlabel("Time (s)")
     axs[1].set_ylabel("Pixel")
-    plt.savefig(output_path / "pixelwise_raster_sorted.tif", dpi=300)
+    # plt.savefig(output_path / "pixelwise_raster_sorted_ca.tif", dpi=300)
+    plt.savefig(output_path / "pixelwise_raster_sorted_ca.svg")
+
+    
+    # Plot an image (pixels x time) of the local correlation coefficients, sorted by the total absolute correlation
+    local_corr_mag = np.sum(np.abs(local_corrs), axis=1)
+    local_corrs_sorted = local_corrs[np.argsort(-local_corr_mag).ravel()]
+    
+    fig1, axs = plt.subplots(2,1, figsize=(12, 8))
+    q = axs[0].imshow(local_corrs_sorted, aspect="auto", cmap="cet_CET_D1", vmin=-1, vmax=1)
+    ymin, ymax = axs[0].get_ylim()
+    cb = fig1.colorbar(q, ax=axs[0])
+    cb.ax.set_title(r"$\rho$")
+    axs[0].vlines(pks, ymin, ymax, color="black")
+    axs[0].set_xticks(axs[0].get_xticks(), labels=(axs[0].get_xticks() * mean_dt).astype(int))
+    axs[0].set_xlim(0, local_corrs.shape[1] - 1)
+    axs[0].set_xlabel("Time (s)")
+    axs[0].set_ylabel("Pixel")
+
+
+    q = axs[1].imshow(np.abs(local_corrs_sorted), aspect="auto", vmin=0, vmax=1)
+
+    ymin, ymax = axs[1].get_ylim()
+    cb = fig1.colorbar(q, ax=axs[1])
+    cb.ax.set_title(r"$|\rho|$")
+    axs[1].vlines(pks, ymin, ymax, color="black")
+    axs[1].set_xticks(axs[1].get_xticks(), labels=(axs[1].get_xticks() * mean_dt).astype(int))
+    axs[1].set_xlim(0, local_corrs.shape[1] - 1)
+    axs[1].set_xlabel("Time (s)")
+    axs[1].set_ylabel("Pixel")
+    # plt.savefig(output_path / "pixelwise_raster_sorted_mag.tif", dpi=300)
+    plt.savefig(output_path / "pixelwise_raster_sorted_mag.svg")
 
     # Plot images of the standard deviation, mean, and maximum of the local correlation coefficients
     # at each pixel over time
