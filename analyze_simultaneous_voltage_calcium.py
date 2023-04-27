@@ -187,12 +187,18 @@ ca_trace = images.extract_mask_trace(ca_dFF, pc1_mask)
 ca_trace_smoothed = ndimage.gaussian_filter(ca_trace, 2)
 
 logger.info("Detecting peaks in calcium trace for triggered averages")
-pks, _ = signal.find_peaks(
+pks, props = signal.find_peaks(
     ca_trace_smoothed,
     prominence=max(
         0.3 * (ca_trace_smoothed.max() - ca_trace_smoothed.min()), args.hard_cutoff
     ),
 )
+if len(pks) > 0:
+    with open(output_datadir / f"{file_name}_ca_peaks.pickle", "wb") as f:
+        props["peaks"] = pks
+        props["peak_values"] = ca_trace_smoothed[pks]
+        props["peak_times"] = t[pks]
+        pickle.dump(props, f)
 
 if args.plot:
     logger.info("Plotting spike detection")
