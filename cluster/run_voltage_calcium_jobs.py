@@ -2,6 +2,7 @@ import argparse
 import subprocess
 import os
 import pandas as pd
+import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootpath", type=str)
@@ -15,13 +16,7 @@ parser.add_argument("--sta_after", default=5, type=float)
 
 
 args = parser.parse_args()
-
 rootpath = args.rootpath
-output_dir = args.output_dir
-bg_const = args.bg_const
-
-if output_dir is None:
-    output_dir = rootpath
 
 expt_info = pd.read_csv(os.path.join(rootpath, args.expt_info), dtype=str).sort_values(
     "start_time"
@@ -43,3 +38,4 @@ for i in range(expt_info.shape[0]):
     ]
     print(sh_line)
     subprocess.run(sh_line, check=True)
+    time.sleep(0.5)

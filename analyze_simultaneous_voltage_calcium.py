@@ -81,7 +81,8 @@ t = np.arange(voltage_image.shape[0]) * mean_dt
 
 logger.info("Regressing background from voltage imaging data")
 potential_bg_traces_v = images.extract_background_traces(
-    voltage_image, mode=["linear", "dark", "corners", "exp", "biexp"]
+    voltage_image, mode=["linear", "dark", "corners", "exp", "biexp"], corner_divs=8,
+    dark_percentile=5
 ).astype(np.float32)
 multi_regressed_v = images.regress_video(voltage_image, potential_bg_traces_v.T)
 
@@ -149,10 +150,10 @@ calcium_image, _ = images.load_image(rootdir, file_name, subfolder=subfolder_cal
 
 logger.info("Regressing background from calcium imaging data")
 potential_bg_traces_ca = images.extract_background_traces(
-    calcium_image, mode=["linear", "dark", "corners", "exp", "biexp"]
+    calcium_image, mode=["linear", "exp", "biexp"], n_samps_localmin=81
 ).astype(np.float32)
 multi_regressed_ca = images.regress_video(
-    calcium_image, potential_bg_traces_ca[:, [0, 3]].T
+    calcium_image, potential_bg_traces_ca.T
 )
 
 if args.plot:
@@ -165,7 +166,6 @@ if args.plot:
     axs[1].set_xlabel("Time (s)")
     plt.savefig(analysis_dir / f"{file_name}_bg_regression_ca.svg")
     plt.savefig(output_datadir / f"{file_name}_bg_regression_ca.svg")
-
 logger.info("Calculating dFF from calcium imaging data")
 ca_dFF = (
     images.get_image_dFF(

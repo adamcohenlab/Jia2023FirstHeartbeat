@@ -458,7 +458,8 @@ def background_subtract(img: npt.NDArray, dark_level: int = 100) -> npt.NDArray:
 
 
 def extract_background_traces(
-    img: npt.NDArray, mode: Union[str, Collection[str]] = "all", corner_divs: int = 5
+    img: npt.NDArray, mode: Union[str, Collection[str]] = "all", corner_divs: int = 5, 
+    dark_percentile: int = 10, n_samps_localmin=101
 ) -> npt.NDArray:
     """Use one or more of several heuristics to find possible sources of background.
 
@@ -468,13 +469,15 @@ def extract_background_traces(
             the methods specified in the list.
         corner_divs: number of divisions to make when calculating the mean of the corners
             of the image
+        dark_percentile: The threshold to use for defining dark regions
     Returns:
         background_traces: 2D array of background traces (timepoints x methods)
     """
     if mode == "all":
-        mode = ["linear", "mean", "dark", "corners", "exp", "biexp"]
+        mode = ["linear", "mean", "dark", "corners", "exp", "biexp", "localmin"]
     background_traces: List[npt.NDArray] = []
-
+    mean_trace = img.mean(axis=(1, 2))
+    mean_img = img.mean(axis=0)
     tr: Union[npt.NDArray, List[npt.NDArray]]
     for m in mode:
         if m == "linear":
@@ -482,17 +485,16 @@ def extract_background_traces(
         elif m == "mean":
             tr = img.mean(axis=(1, 2))
         elif m in ("exponential", "exp"):
-            mean_trace = img.mean(axis=(1, 2))
             _, tr, _ = traces.correct_photobleach(mean_trace, method="monoexp")
         elif m in ("biexponential", "biexp"):
-            mean_trace = img.mean(axis=(1, 2))
             _, tr, _ = traces.correct_photobleach(mean_trace, method="biexp")
+        elif m == "localmin":
+            _, tr, _ = traces.correct_photobleach(mean_trace, method="localmin",
+                                        nsamps=n_samps_localmin)
         elif m == "dark":
-            mean_img = img.mean(axis=0)
-            mask = mean_img < np.percentile(mean_img, 10)
+            mask = mean_img < np.percentile(mean_img, dark_percentile)
             tr = extract_mask_trace(img, mask)
         elif m == "corners":
-            mean_img = img.mean(axis=0)
             tr = []
             div0 = mean_img.shape[0] // corner_divs
             div1 = mean_img.shape[1] // corner_divs

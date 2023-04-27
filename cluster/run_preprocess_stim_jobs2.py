@@ -2,6 +2,7 @@ import argparse
 import subprocess
 import os
 import pandas as pd
+import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootpath", type=str)
@@ -81,3 +82,4 @@ for i in range(expt_info.shape[0]):
     ]
     print(sh_line)
     subprocess.run(sh_line, check=True)
+    time.sleep(0.5)
