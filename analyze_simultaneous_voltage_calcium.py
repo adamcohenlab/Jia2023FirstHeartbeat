@@ -38,9 +38,11 @@ parser.add_argument("--plot", default=True, type=utils.str2bool)
 parser.add_argument("--um_per_px", default=0.265 * 4, type=float)
 parser.add_argument("--hard_cutoff", default=0.005, type=float)
 parser.add_argument("--downsample_factor", default=16, type=int)
-parser.add_argument("--window_size", default=111, type=int)
+parser.add_argument("--window_size_s", default=4, type=float)
 parser.add_argument("--sta_before_s", default=2, type=float)
 parser.add_argument("--sta_after_s", default=5, type=float)
+parser.add_argument("--frame_start", default=0, type=int)
+parser.add_argument("--frame_end", default=0, type=int)
 args = parser.parse_args()
 
 rootdir = Path(args.rootdir)
@@ -74,10 +76,16 @@ voltage_image, metadata = images.load_image(
     rootdir, file_name, subfolder=subfolder_voltage
 )
 assert metadata is not None
+frame_start = args.frame_start
+frame_end = voltage_image.shape[0] - args.frame_end
+voltage_image = voltage_image[frame_start:frame_end]
+
 mean_dt = np.mean(np.diff(utils.get_frame_times(metadata)))
 sta_before = int(args.sta_before_s / mean_dt)
 sta_after = int(args.sta_after_s / mean_dt)
+window_size = int(args.window_size_s / mean_dt)//2 * 2 + 1
 t = np.arange(voltage_image.shape[0]) * mean_dt
+
 
 logger.info("Regressing background from voltage imaging data")
 potential_bg_traces_v = images.extract_background_traces(
@@ -147,10 +155,11 @@ del comp_vid
 logger.info("Loading calcium imaging data")
 subfolder_calcium = "cam2_registered_downsampled"
 calcium_image, _ = images.load_image(rootdir, file_name, subfolder=subfolder_calcium)
+calcium_image = calcium_image[frame_start:frame_end]
 
 logger.info("Regressing background from calcium imaging data")
 potential_bg_traces_ca = images.extract_background_traces(
-    calcium_image, mode=["linear", "exp", "biexp"], n_samps_localmin=81
+    calcium_image, mode=["linear", "exp", "biexp"]
 ).astype(np.float32)
 multi_regressed_ca = images.regress_video(
     calcium_image, potential_bg_traces_ca.T

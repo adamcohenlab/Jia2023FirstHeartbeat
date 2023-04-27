@@ -10,9 +10,11 @@ parser.add_argument("--expt_info", type=str, default="analysis/experiment_data.c
 parser.add_argument("--um_per_px", default=0.265 * 4, type=float)
 parser.add_argument("--hard_cutoff", default=0.005, type=float)
 parser.add_argument("--downsample_factor", default=16, type=int)
-parser.add_argument("--window_size", default=111, type=int)
-parser.add_argument("--sta_before", default=2, type=float)
-parser.add_argument("--sta_after", default=5, type=float)
+parser.add_argument("--window_size_s", default=4, type=float)
+parser.add_argument("--sta_before_s", default=2, type=float)
+parser.add_argument("--sta_after_s", default=5, type=float)
+parser.add_argument("--frame_start", default=0, type=int)
+parser.add_argument("--frame_end", default=-0, type=int)
 
 
 args = parser.parse_args()
@@ -32,9 +34,11 @@ for i in range(expt_info.shape[0]):
         str(args.um_per_px),
         str(args.hard_cutoff),
         str(args.downsample_factor),
-        str(args.window_size),
-        str(args.sta_before),
-        str(args.sta_after),
+        str(args.window_size_s),
+        str(args.sta_before_s),
+        str(args.sta_after_s),
+        str(args.frame_start),
+        str(args.frame_end),
     ]
     print(sh_line)
     subprocess.run(sh_line, check=True)
