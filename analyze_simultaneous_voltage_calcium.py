@@ -91,7 +91,9 @@ potential_bg_traces_v = images.extract_background_traces(
     voltage_image, mode=["linear", "dark", "corners", "exp", "biexp"], corner_divs=8,
     dark_percentile=5
 ).astype(np.float32)
-multi_regressed_v = images.regress_video(voltage_image, potential_bg_traces_v.T)
+multi_regressed_v = images.regress_video(voltage_image, potential_bg_traces_v.T[[1,2]])
+multi_regressed_v = images.regress_video(multi_regressed_v, potential_bg_traces_v.T[0][None,:])
+multi_regressed_v = images.regress_video(multi_regressed_v, potential_bg_traces_v.T[[3,4]])
 
 skio.imsave(
     analysis_dir / f"{file_name}_multi_regressed_v.tif",
@@ -161,8 +163,14 @@ potential_bg_traces_ca = images.extract_background_traces(
     calcium_image, mode=["linear", "exp", "biexp"]
 ).astype(np.float32)
 multi_regressed_ca = images.regress_video(
-    calcium_image, potential_bg_traces_ca.T
+    calcium_image, potential_bg_traces_ca.T[2][None,:]
 )
+# multi_regressed_ca = images.regress_video(
+#     calcium_image, potential_bg_traces_ca.T[[1,2]]
+# )
+# multi_regressed_ca = images.regress_video(
+#     multi_regressed_ca, potential_bg_traces_ca.T[0][None,:]
+# )
 
 if args.plot:
     logger.info("Plotting background regression of calcium imaging data")
