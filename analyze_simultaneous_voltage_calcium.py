@@ -50,7 +50,7 @@ file_name = args.file_name
 um_per_px = args.um_per_px
 factor = args.downsample_factor
 warnings.filterwarnings("once")
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 plt.style.use(Path(SPIKECOUNTER_PATH, "config", "bio_publications.mplstyle"))
 
 logger = utils.initialize_logging(rootdir / file_name)
@@ -63,7 +63,9 @@ expt_name = rootdir.stem
 output_datadir = Path(
     ANAYLSIS_OUTPUT_ROOTDIR,
     "2022 First Heartbeat_Submitted",
-    "Figures/Data/Figure3/", expt_name, file_name
+    "Figures/Data/Figure3/",
+    expt_name,
+    file_name,
 )
 os.makedirs(output_datadir, exist_ok=True)
 analysis_dir = rootdir / "analysis" / file_name
@@ -82,14 +84,16 @@ voltage_image = voltage_image[frame_start:frame_end]
 mean_dt = np.mean(np.diff(utils.get_frame_times(metadata)))
 sta_before = int(args.sta_before_s / mean_dt)
 sta_after = int(args.sta_after_s / mean_dt)
-window_size = int(args.window_size_s / mean_dt)//2 * 2 + 1
+window_size = int(args.window_size_s / mean_dt) // 2 * 2 + 1
 t = np.arange(voltage_image.shape[0]) * mean_dt
 
 
 logger.info("Regressing background from voltage imaging data")
 potential_bg_traces_v = images.extract_background_traces(
-    voltage_image, mode=["linear", "dark", "corners", "biexp"], corner_divs=8,
-    dark_percentile=5
+    voltage_image,
+    mode=["linear", "dark", "corners", "biexp"],
+    corner_divs=8,
+    dark_percentile=5,
 ).astype(np.float32)
 multi_regressed_v = images.regress_video(voltage_image, potential_bg_traces_v.T)
 
@@ -113,7 +117,8 @@ if args.plot:
 logger.info("Calculating dFF from voltage imaging data")
 v_dFF = (
     images.get_image_dFF(
-        ndimage.gaussian_filter(multi_regressed_v, (2, 3, 3)).astype(np.float32), invert=True
+        ndimage.gaussian_filter(multi_regressed_v, (2, 3, 3)).astype(np.float32),
+        invert=True,
     )
     - 1
 )
@@ -160,9 +165,7 @@ logger.info("Regressing background from calcium imaging data")
 potential_bg_traces_ca = images.extract_background_traces(
     calcium_image, mode=["biexp"]
 ).astype(np.float32)
-multi_regressed_ca = images.regress_video(
-    calcium_image, potential_bg_traces_ca.T
-)
+multi_regressed_ca = images.regress_video(calcium_image, potential_bg_traces_ca.T)
 # multi_regressed_ca = images.regress_video(
 #     calcium_image, potential_bg_traces_ca.T[[1,2]]
 # )
@@ -183,7 +186,8 @@ if args.plot:
 logger.info("Calculating dFF from calcium imaging data")
 ca_dFF = (
     images.get_image_dFF(
-        ndimage.gaussian_filter(multi_regressed_ca, (2, 3, 3)).astype(np.float32), invert=False
+        ndimage.gaussian_filter(multi_regressed_ca, (2, 3, 3)).astype(np.float32),
+        invert=False,
     )
     - 1
 )
@@ -199,12 +203,13 @@ pc1 = np.abs(u[:, 0].reshape(ca_dFF.shape[1:]))
 pc1_mask = pc1 > filters.threshold_otsu(pc1)
 ca_trace = images.extract_mask_trace(ca_dFF, pc1_mask)
 ca_trace_smoothed = ndimage.gaussian_filter(ca_trace, 2)
+v_trace = images.extract_mask_trace(v_dFF, pc1_mask)
 
 logger.info("Detecting peaks in calcium trace for triggered averages")
 pks, props = signal.find_peaks(
     ca_trace_smoothed,
     prominence=max(
-        0.3 * (ca_trace_smoothed.max() - ca_trace_smoothed.min()), args.hard_cutoff
+        0.2 * (ca_trace_smoothed.max() - ca_trace_smoothed.min()), args.hard_cutoff
     ),
 )
 if len(pks) > 0:
@@ -229,7 +234,6 @@ if args.plot:
     plt.savefig(output_datadir / f"{file_name}_calcium_pca.svg")
     plt.close("all")
 
-
     fig1, ax1 = plt.subplots(figsize=(4, 4))
     visualize.display_roi_overlay(pc1, pc1_mask, alpha=0.5, ax=ax1)
     ax1.axis("off")
@@ -245,6 +249,17 @@ if args.plot:
     plt.tight_layout()
     plt.savefig(analysis_dir / f"{file_name}_ca_spike_trace.svg")
     plt.savefig(output_datadir / f"{file_name}_ca_spike_trace.svg")
+
+    fig1, ax1 = plt.subplots(figsize=(6, 3))
+    ax1.plot(t, ca_trace)
+    ax2 = ax1.twinx()
+    ax2.plot(t, v_trace, color="C1")
+    ax1.set_xlabel("Time (s)")
+    ax1.set_ylabel(r"Ca $\Delta F/F$")
+    ax2.set_ylabel(r"V $-\Delta F/F$")
+    plt.tight_layout()
+    plt.savefig(analysis_dir / f"{file_name}_ca_v_trace.svg")
+    plt.savefig(output_datadir / f"{file_name}_ca_v_trace.svg")
 
 logger.info("Generating triggered averages of videos and mean traces of active regions")
 ca_triggered_sta_ca, _ = images.spike_triggered_average_video(
@@ -363,109 +378,89 @@ def calculate_local_corrs(v_ravelled, ca_ravelled, ws):
     return num / den
 
 
-def final_analysis_plotting(
-    output_path, local_corrs, pks, mask_downsampled
-):
+def plot_correlation_raster(lc, pks):
+    X, Y = np.meshgrid(t, np.arange(lc.shape[0]))
+    fig1, axs = plt.subplots(
+        3, 1, figsize=(12, 10), sharex=True, gridspec_kw={"height_ratios": [1, 2, 2]}
+    )
+    ax1 = axs[0].twinx()
+    axs[0].plot(t, ca_trace)
+    ax1.plot(t, v_trace, color="C1")
+    axs[0].set_ylabel(r"Calcium $\Delta F/F$", color="C0")
+    ax1.set_ylabel(r"Voltage $-\Delta F/F$", color="C1")
+
+    q1 = axs[1].pcolormesh(X, Y, lc, cmap="cet_CET_D1", vmin=-1, vmax=1, rasterized=True)
+    ymin, ymax = axs[1].get_ylim()
+    axs[1].vlines(t[pks], ymin, ymax, color="black")
+    axs[1].set_ylabel("Pixel")
+    axs[1].invert_yaxis()
+
+    q2 = axs[2].pcolormesh(X, Y, np.abs(lc), vmin=0, vmax=1, rasterized=True)
+    ymin, ymax = axs[2].get_ylim()
+    axs[2].vlines(t[pks], ymin, ymax, color="black")
+    axs[2].set_xlabel("Time (s)")
+    axs[2].set_ylabel("Pixel")
+    axs[2].invert_yaxis()
+    plt.tight_layout()
+
+    cax = fig1.add_axes([0.95, 0.44, 0.015, 0.33])
+    cb = fig1.colorbar(q1, cax=cax)
+    cb.ax.set_title(r"$\rho$")
+
+    cax = fig1.add_axes([0.95, 0.06, 0.015, 0.33])
+    cb = fig1.colorbar(q2, cax=cax)
+    cb.ax.set_title(r"$|\rho|$")
+
+    return fig1, axs, X, Y
+
+
+def final_analysis_plotting(output_path, local_corrs, pks, mask_downsampled):
     # Plot an image (pixels x time) of the local correlation coefficients. Regions of putative
     # calcium activity are masked in gray. Detected peaks are marked with black lines.
-    fig1, axs = plt.subplots(2,1, figsize=(12, 8))
+    fig1, axs, X, Y = plot_correlation_raster(local_corrs, pks)
     has_calcium_activity = np.zeros_like(local_corrs, dtype=bool)
     has_calcium_activity[mask_downsampled.ravel(), :] = True
-    q = axs[0].imshow(local_corrs, aspect="auto", cmap="cet_CET_D1", vmin=-1, vmax=1)
-    axs[0].imshow(
+    axs[1].pcolormesh(
+        X,
+        Y,
         np.ma.masked_array(has_calcium_activity, ~has_calcium_activity),
-        aspect="auto",
         cmap="gray",
         alpha=0.3,
+        rasterized=True,
     )
-    ymin, ymax = axs[0].get_ylim()
-    cb = fig1.colorbar(q, ax=axs[0])
-    cb.ax.set_title(r"$\rho$")
-    axs[0].vlines(pks, ymin, ymax, color="black")
-    axs[0].set_xticks(axs[0].get_xticks(), labels=(axs[0].get_xticks() * mean_dt).astype(int))
-    axs[0].set_xlim(0, local_corrs.shape[1] - 1)
-    axs[0].set_xlabel("Time (s)")
-    axs[0].set_ylabel("Pixel")
-
-    q = axs[1].imshow(np.abs(local_corrs), aspect="auto", vmin=0, vmax=1)
-    axs[1].imshow(
+    axs[2].pcolormesh(
+        X,
+        Y,
         np.ma.masked_array(has_calcium_activity, ~has_calcium_activity),
-        aspect="auto",
         cmap="gray",
         alpha=0.3,
+        rasterized=True,
     )
-    ymin, ymax = axs[1].get_ylim()
-    cb = fig1.colorbar(q, ax=axs[1])
-    cb.ax.set_title(r"$|\rho|$")
-    axs[1].vlines(pks, ymin, ymax, color="black")
-    axs[1].set_xticks(axs[1].get_xticks(), labels=(axs[1].get_xticks() * mean_dt).astype(int))
-    axs[1].set_xlim(0, local_corrs.shape[1] - 1)
-    axs[1].set_xlabel("Time (s)")
-    axs[1].set_ylabel("Pixel")
-    plt.savefig(output_path / "pixelwise_raster.svg")
+    plt.savefig(output_path / "pixelwise_raster.svg", dpi=300)
 
-    # Plot an image (pixels x time) of the local correlation coefficients, sorted by whether there 
+    # Plot an image (pixels x time) of the local correlation coefficients, sorted by whether there
     # is calcium activity. Detected peaks are marked with black lines.
-    local_corrs_sorted = np.concatenate([local_corrs[has_calcium_activity[:,0]],
-                                  local_corrs[~has_calcium_activity[:,0]]], axis=0
-                                  )
-    
-    fig1, axs = plt.subplots(2,1, figsize=(12, 8))
-    q = axs[0].imshow(local_corrs_sorted, aspect="auto", cmap="cet_CET_D1", vmin=-1, vmax=1)
-    ymin, ymax = axs[0].get_ylim()
-    cb = fig1.colorbar(q, ax=axs[0])
-    cb.ax.set_title(r"$\rho$")
-    axs[0].vlines(pks, ymin, ymax, color="black")
-    axs[0].axhline(np.sum(has_calcium_activity[:,0]) - 0.5, color="black", linestyle="--")
-    axs[0].set_xticks(axs[0].get_xticks(), labels=(axs[0].get_xticks() * mean_dt).astype(int))
-    axs[0].set_xlim(0, local_corrs.shape[1] - 1)
-    axs[0].set_xlabel("Time (s)")
-    axs[0].set_ylabel("Pixel")
+    local_corrs_sorted = np.concatenate(
+        [
+            local_corrs[has_calcium_activity[:, 0]],
+            local_corrs[~has_calcium_activity[:, 0]],
+        ],
+        axis=0,
+    )
+    fig1, axs, X, Y = plot_correlation_raster(local_corrs_sorted, pks)
+    axs[1].axhline(
+        np.sum(has_calcium_activity[:, 0]) - 0.5, color="black", linestyle="--"
+    )
+    axs[2].axhline(
+        np.sum(has_calcium_activity[:, 0]) - 0.5, color="black", linestyle="--"
+    )
+    plt.savefig(output_path / "pixelwise_raster_sorted_ca.svg", dpi=300)
 
-
-    q = axs[1].imshow(np.abs(local_corrs_sorted), aspect="auto", vmin=0, vmax=1)
-
-    ymin, ymax = axs[1].get_ylim()
-    cb = fig1.colorbar(q, ax=axs[1])
-    cb.ax.set_title(r"$|\rho|$")
-    axs[1].vlines(pks, ymin, ymax, color="black")
-    axs[1].axhline(np.sum(has_calcium_activity[:,0]) - 0.5, color="black", linestyle="--")
-    axs[1].set_xticks(axs[1].get_xticks(), labels=(axs[1].get_xticks() * mean_dt).astype(int))
-    axs[1].set_xlim(0, local_corrs.shape[1] - 1)
-    axs[1].set_xlabel("Time (s)")
-    axs[1].set_ylabel("Pixel")
-    # plt.savefig(output_path / "pixelwise_raster_sorted_ca.tif", dpi=300)
-    plt.savefig(output_path / "pixelwise_raster_sorted_ca.svg")
-
-    
     # Plot an image (pixels x time) of the local correlation coefficients, sorted by the total absolute correlation
     local_corr_mag = np.sum(np.abs(local_corrs), axis=1)
     local_corrs_sorted = local_corrs[np.argsort(-local_corr_mag).ravel()]
-    
-    fig1, axs = plt.subplots(2,1, figsize=(12, 8))
-    q = axs[0].imshow(local_corrs_sorted, aspect="auto", cmap="cet_CET_D1", vmin=-1, vmax=1)
-    ymin, ymax = axs[0].get_ylim()
-    cb = fig1.colorbar(q, ax=axs[0])
-    cb.ax.set_title(r"$\rho$")
-    axs[0].vlines(pks, ymin, ymax, color="black")
-    axs[0].set_xticks(axs[0].get_xticks(), labels=(axs[0].get_xticks() * mean_dt).astype(int))
-    axs[0].set_xlim(0, local_corrs.shape[1] - 1)
-    axs[0].set_xlabel("Time (s)")
-    axs[0].set_ylabel("Pixel")
-
-
-    q = axs[1].imshow(np.abs(local_corrs_sorted), aspect="auto", vmin=0, vmax=1)
-
-    ymin, ymax = axs[1].get_ylim()
-    cb = fig1.colorbar(q, ax=axs[1])
-    cb.ax.set_title(r"$|\rho|$")
-    axs[1].vlines(pks, ymin, ymax, color="black")
-    axs[1].set_xticks(axs[1].get_xticks(), labels=(axs[1].get_xticks() * mean_dt).astype(int))
-    axs[1].set_xlim(0, local_corrs.shape[1] - 1)
-    axs[1].set_xlabel("Time (s)")
-    axs[1].set_ylabel("Pixel")
-    # plt.savefig(output_path / "pixelwise_raster_sorted_mag.tif", dpi=300)
-    plt.savefig(output_path / "pixelwise_raster_sorted_mag.svg")
+    fig1, axs, X, Y = plot_correlation_raster(local_corrs_sorted, pks)
+    plt.savefig(output_path / "pixelwise_raster_sorted_mag.svg", dpi=300)
 
     # Plot images of the standard deviation, mean, and maximum of the local correlation coefficients
     # at each pixel over time
@@ -517,7 +512,11 @@ def final_analysis_plotting(
     ax1.vlines(t[pks], ymin, ymax, color="black")
     for pk in pks:
         ax1.fill_between(
-            np.arange(pk - sta_before, pk + sta_after) * mean_dt, ymin, ymax, color="gray", alpha=0.2
+            np.arange(pk - sta_before, pk + sta_after) * mean_dt,
+            ymin,
+            ymax,
+            color="gray",
+            alpha=0.2,
         )
     ax1.set_xlabel("Time (s)")
     ax1.set_ylabel(r"Mean $\rho$" + f" ({window_size} frames)")
@@ -569,8 +568,5 @@ corr_video = local_corrs.T.reshape(v_downsampled.shape).astype(np.float32)
 skio.imsave(output_datadir / f"{file_name}_corr_video_lag_corrected.tif", corr_video)
 os.makedirs(output_datadir / "final_plots_lag_corrected", exist_ok=True)
 final_analysis_plotting(
-    output_datadir / "final_plots_lag_corrected",
-    local_corrs,
-    pks,
-    mask_downsampled
+    output_datadir / "final_plots_lag_corrected", local_corrs, pks, mask_downsampled
 )
