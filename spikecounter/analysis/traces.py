@@ -284,7 +284,6 @@ def correct_photobleach(
         if return_params:
             return corrected_trace, photobleach, popt
     elif method == "biexp":
-
         def biexpon_soft_constraint(x, constraint_function, a=5, b=2):
             """ Similar function to expon_soft_constraint, but for a biexponential decay function
 
@@ -308,13 +307,22 @@ def correct_photobleach(
 
         guess_tc = -(np.percentile(trace, 95) / np.percentile(trace, 5)) / len(trace)
         guess_tc2 = guess_tc * 5
+        # p0 = [
+        #     (np.max(trace) - np.min(trace)) * 0.95,
+        #     guess_tc,
+        #     (np.max(trace) - np.min(trace)) * 0.05,
+        #     guess_tc2,
+        #     np.min(trace) * 0.8,
+        # ]
+        trace_bounds = (np.max(trace) - np.min(trace))
         p0 = [
-            (np.max(trace) - np.min(trace)) * 0.95,
+            trace_bounds * 0.05,
             guess_tc,
-            (np.max(trace) - np.min(trace)) * 0.05,
+            trace_bounds * 0.95,
             guess_tc2,
             np.min(trace) * 0.8,
         ]
+        print(p0)
         if invert:
             p0[4] = np.max(trace)
             res = optimize.minimize(
@@ -367,6 +375,110 @@ def correct_photobleach(
         photobleach = popt[0] * np.exp(tidx * popt[1]) + popt[2] * np.exp(
             tidx * popt[3]
         )
+        corrected_trace = trace - photobleach
+        if return_params:
+            return corrected_trace, photobleach, popt
+    elif method == "triexp":
+        def triexpon_soft_constraint(x, constraint_function, a=5, b=2):
+            """ Similar function to expon_soft_constraint, but for a triexponential decay function
+
+            Args:
+                x: 1D array of parameters for the exponential decay function.
+                    x[0] = amplitude
+                    x[1] = time constant
+                    x[2] = amplitude
+                    x[3] = time constant
+                    x[4] = constant offset
+                constraint_function: Function that takes the trace and returns a soft constraint
+                a: Parameter for soft constraint function
+                b: Parameter for soft constraint function
+            Returns:
+                cost: value of cost function for the optimization
+            """
+            y = x[0] * np.exp(tidx * x[1]) + x[2] * np.exp(tidx * x[3]) + x[4] * np.exp(tidx * x[5]) + x[6]
+            soft_constraint = constraint_function(y, a, b)
+            cost = np.sum((y - trace) ** 2 + soft_constraint)
+            return cost
+
+        guess_tc = -(np.percentile(trace, 95) / np.percentile(trace, 5)) / len(trace)
+        guess_tc2 = guess_tc * 5
+        guess_tc3 = guess_tc2 * 5
+        # p0 = [
+        #     (np.max(trace) - np.min(trace)) * 0.95,
+        #     guess_tc,
+        #     (np.max(trace) - np.min(trace)) * 0.05,
+        #     guess_tc2,
+        #     np.min(trace) * 0.8,
+        # ]
+        trace_range = (np.max(trace) - np.min(trace))
+        p0 = [
+            trace_range * 0.5,
+            guess_tc,
+            trace_range * 0.1,
+            guess_tc2,
+            trace_range * 0.4,
+            guess_tc3,
+            np.min(trace) * 0.8,
+        ]
+        print(p0)
+        if invert:
+            p0[4] = np.max(trace)
+            res = optimize.minimize(
+                lambda x: triexpon_soft_constraint(
+                    x,
+                    lambda y, a, b: a * np.exp(b * (trace - y)),
+                    **cost_function_params,
+                ),
+                p0,
+                bounds=[
+                    (0, np.inf),
+                    (-np.inf, 0),
+                    (0, np.inf),
+                    (-np.inf, guess_tc),
+                    (0, np.inf),
+                    (-np.inf, guess_tc2),
+                    (-np.inf, np.inf),
+                ],
+            )
+        else:
+            res = optimize.minimize(
+                lambda x: triexpon_soft_constraint(
+                    x,
+                    lambda y, a, b: a * np.exp(b * (y - trace)),
+                    **cost_function_params,
+                ),
+                p0,
+                bounds=[
+                    (0, np.inf),
+                    (-np.inf, 0),
+                    (0, np.inf),
+                    (-np.inf, guess_tc),
+                    (0, np.inf),
+                    (-np.inf, guess_tc2),
+                    (-np.inf, np.inf),
+                ],
+            )
+        popt = res.x
+        if plot:
+            fig1, ax1 = plt.subplots(figsize=(6, 6))
+            ax1.scatter(tidx, trace, s=0.8, alpha=0.5)
+            ax1.plot(
+                tidx,
+                popt[0] * np.exp(popt[1] * tidx)
+                + popt[2] * np.exp(popt[3] * tidx)
+                + popt[4] * np.exp(popt[5] * tidx)
+                + popt[6],
+                color="red",
+            )
+            ax1.text(
+                10,
+                popt[4] + popt[0] + popt[2],
+                f"{popt[0]:.2E} exp({popt[1]:.2E} t) + {popt[2]:.2E} exp({popt[3]:.2E} t) + {popt[4]:.2E} exp({popt[5]:.2E} t) + {popt[6]:.2E}",
+            )
+        photobleach = popt[0] * np.exp(tidx * popt[1]) + popt[2] * np.exp(
+            tidx * popt[3]
+        ) + popt[4] * np.exp(
+            tidx * popt[5])
         corrected_trace = trace - photobleach
         if return_params:
             return corrected_trace, photobleach, popt

@@ -487,7 +487,7 @@ def extract_background_traces(
         elif m in ("exponential", "exp"):
             _, tr, _ = traces.correct_photobleach(mean_trace, method="monoexp")
         elif m in ("biexponential", "biexp"):
-            _, tr, _ = traces.correct_photobleach(mean_trace, method="biexp")
+            _, tr, _ = traces.correct_photobleach(mean_trace, method="biexp", b=3, a=5)
         elif m == "localmin":
             _, tr, _ = traces.correct_photobleach(mean_trace, method="localmin",
                                         nsamps=n_samps_localmin)
