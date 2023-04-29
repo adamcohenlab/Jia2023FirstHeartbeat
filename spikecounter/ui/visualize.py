@@ -1,5 +1,15 @@
 """ Functions for visualizing data """
-from typing import Union, Tuple, List, Any, Sequence, Collection, Optional, Callable
+from typing import (
+    Union,
+    Tuple,
+    List,
+    Any,
+    Sequence,
+    Collection,
+    Optional,
+    Callable,
+    Dict,
+)
 
 import matplotlib as mpl
 from matplotlib import axes, figure, patches
@@ -10,6 +20,7 @@ from numpy import typing as npt
 import pandas as pd
 from sklearn.decomposition import PCA
 from ..analysis import images
+from .. import utils
 
 
 def display_roi_overlay(
@@ -170,7 +181,7 @@ def stackplot(
     offset: Union[float, None] = None,
     cmap: Union[mpl.colors.Colormap, None] = None,
     flipud: bool = False,
-    **plot_args
+    **plot_args,
 ) -> Tuple[figure.Figure, axes.Axes, List[Any], float]:
     """Plot a collection of traces with a common x-axis offset by a constant amount.
 
@@ -545,8 +556,8 @@ def plot_pca_data(
     gc: Union[npt.NDArray, Tuple[int, int]],
     n_components: int = 5,
     pc_title: Optional[Callable[..., str]] = None,
-    mode: str ="temporal",
-    single_figsize: Tuple[float, float] = (12,6)
+    mode: str = "temporal",
+    single_figsize: Tuple[float, float] = (12, 6),
 ) -> Tuple[figure.Figure, axes.Axes]:
     """Show spatial principal components of a video and the corresponding
     temporal trace (dot product).
@@ -568,48 +579,84 @@ def plot_pca_data(
     Raises:
         ValueError: if mode is not "temporal" or "spatial"
     """
-    
+
     if isinstance(pca, PCA):
         components = pca.components_
         if pc_title is None:
+
             def pct(j, *args):
                 return f"PC {j+1} (Fraction Var:{pca.explained_variance_ratio_[j]:.3f})"
+
             pc_title = pct
     else:
         components = pca
         if pc_title is None:
+
             def pct(j, *args):
                 return f"PC {j+1}"
+
             pc_title = pct
     if mode == "temporal":
         fig1, axs = plt.subplots(
-                n_components, 2, figsize=(single_figsize[0], single_figsize[1]*n_components),
-                gridspec_kw={"width_ratios": [1, 3]}
+            n_components,
+            2,
+            figsize=(single_figsize[0], single_figsize[1] * n_components),
+            gridspec_kw={"width_ratios": [1, 3]},
         )
         for i in range(n_components):
             comp = components[i]
             cropped_region_image = images.extract_cropped_region_image(comp, gc)
             dot_trace = np.matmul(raw_data, comp)
-            pc_img = axs[i,0].imshow(cropped_region_image)
-            axs[i,0].set_title(pc_title(i, comp))
-            axs[i,1].set_title("PC Value")
-            axs[i,1].plot(dot_trace)
-            axs[i,0].set_axis_off()
-            plt.colorbar(pc_img, ax=axs[i,0])
+            pc_img = axs[i, 0].imshow(cropped_region_image)
+            axs[i, 0].set_title(pc_title(i, comp))
+            axs[i, 1].set_title("PC Value")
+            axs[i, 1].plot(dot_trace)
+            axs[i, 0].set_axis_off()
+            plt.colorbar(pc_img, ax=axs[i, 0])
     elif mode == "spatial":
         fig1, axs = plt.subplots(
-            n_components, 2, figsize=(single_figsize[0], single_figsize[1]*n_components),
-            gridspec_kw={"width_ratios": [3, 1]}
+            n_components,
+            2,
+            figsize=(single_figsize[0], single_figsize[1] * n_components),
+            gridspec_kw={"width_ratios": [3, 1]},
         )
         for i in range(n_components):
             comp = components[i]
-            axs[i,0].plot(comp)
-            axs[i,0].set_title(pc_title(i, comp))
+            axs[i, 0].plot(comp)
+            axs[i, 0].set_title(pc_title(i, comp))
             dot_trace = np.matmul(raw_data, comp)
             cropped_region_image = images.extract_cropped_region_image(dot_trace, gc)
-            pc_img = axs[i,1].imshow(cropped_region_image)
-            axs[i,1].set_axis_off()
-            plt.colorbar(pc_img, ax=axs[i,1])
+            pc_img = axs[i, 1].imshow(cropped_region_image)
+            axs[i, 1].set_axis_off()
+            plt.colorbar(pc_img, ax=axs[i, 1])
     else:
         raise ValueError("mode must be 'temporal' or 'spatial'")
     return fig1, axs
+
+
+def plot_daq_traces(
+    matdata: Dict[str, Any], figsize: Tuple[float, float] = (12, 4)
+) -> Tuple[figure.Figure, axes.Axes]:
+    """Plot the analog and digital traces from a DAQ file.
+    Args:
+        matdata: dictionary of data from a DAQ file.
+    Returns:
+        fig, axs
+    """
+    fig, ax1 = plt.subplots(figsize=figsize)
+    ax2 = ax1.twinx()
+    dt_dict_analog, t_analog = utils.traces_to_dict(matdata, trace_types="aof")
+    dt_dict_digital, t_digital = utils.traces_to_dict(matdata, trace_types="dof")
+    for k, v in dt_dict_analog.items():
+        ax1.plot(t_analog, v, label=k)
+    for k, v in dt_dict_digital.items():
+        ax2.plot(t_digital, v, "--", label=k)
+
+    ax1.set_xlabel("Time (s)")
+    ax1.set_ylabel("Analog values")
+    ax2.set_ylabel("Digital values")
+    
+    ax1.legend()
+    ax2.legend()
+    axs= [ax1, ax2]
+    return fig, axs

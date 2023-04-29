@@ -11,7 +11,7 @@ import importlib
 import os
 from os import PathLike
 from datetime import datetime
-from typing import Union, Tuple, Dict, Any, Callable, Generator, Type
+from typing import Union, Tuple, Dict, Any, Callable, Generator, Type, Iterable, Collection
 from collections.abc import Sequence
 
 import numpy as np
@@ -144,7 +144,10 @@ def pad_func_unpad(arr, func, pad_width, **pad_params):
 
 
 def make_iterable(x: Any) -> Generator[Any, Any, Any]:
-    """Catch non-iterable objects and make them iterable
+    """Catch non-iterable objects and make them iterable.
+
+    Treats strings as non-iterable objects.
+
     Args:
         x (Any): object to be made iterable
     Returns:
@@ -587,26 +590,35 @@ def get_frame_times(
 
 
 def traces_to_dict(
-    matdata: Dict[str, Any]
+    matdata: Dict[str, Any],
+    trace_types: Union[str, Iterable[str]] = "all"
 ) -> Tuple[Dict[str, Any], npt.NDArray[np.floating]]:
     """Extract traces from DAQ data, synchronize to camera frames, and return as a dictionary.
     
     Args:
         matdata: Dictionary of DAQ data (derived using load_video_metadata).
+        trace_types: Trace types to extract. If "all", all traces are extracted.
     Returns:
         Dictionary of traces, and array of frame times in seconds.
     """
+    if trace_types != "all":
+        trace_types = make_iterable(trace_types)
+
     # Find daq indices where camera frames were acquired
     rising_edges = np.argwhere(np.diff(matdata["frame_counter"]) == 1).ravel()
     t = rising_edges / matdata["clock_rate"]
     if isinstance(matdata["task_traces"], dict):
-        trace_types = [matdata["task_traces"]]
+        trace_groups = [matdata["task_traces"]]
     else:
-        trace_types = matdata["task_traces"]
+        trace_groups = matdata["task_traces"]
     dt_dict = {}
-    for trace_type in trace_types:
+    for trace_group in trace_groups:
+        # Skip if not a trace type we want
+        if trace_types!="all" and trace_group["task_type"] not in trace_types:
+            continue
+
         # Extract individual traces
-        traces = trace_type["traces"]
+        traces = trace_group["traces"]
         if isinstance(traces["name"], str):
             dt_dict[traces["name"]] = np.zeros_like(rising_edges, dtype=float)
 

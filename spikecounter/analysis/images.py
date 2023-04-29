@@ -896,7 +896,7 @@ def process_isochrones(
 def clamp_intensity(
     img: npt.NDArray[np.floating], pctiles: Tuple[float, float] = (2.0, 99.0)
 ) -> npt.NDArray[np.floating]:
-    """
+    """ Clamp intensities to the given percentiles
     Args:
         img: 2D image
         pctiles: Percentiles to use for clamping
@@ -913,7 +913,7 @@ def clamp_intensity(
 def normalize_and_clamp(
     img: npt.NDArray[np.floating], pctiles: Tuple[float, float] = (0, 99)
 ) -> npt.NDArray[np.floating]:
-    """Normalize an image and clamp values to the given percentiles
+    """ Normalize an image and clamp values to the given percentiles
 
     Args:
         img: 2D image
@@ -1283,38 +1283,6 @@ def spike_triggered_average_video(
     else:
         return sta, None
 
-
-def test_isochron_detection(vid, x, y, savgol_window=25, figsize=(8, 3)):
-    """Check detection of half-maximum in spike_triggered averages"""
-
-    trace = vid[:, y, x]
-    trace_smoothed = signal.savgol_filter(trace, savgol_window, 2)
-    fig1, ax1 = plt.subplots(figsize=figsize)
-    ax1.plot(trace)
-    ax1.plot(trace_smoothed)
-    zeroed = trace_smoothed - trace_smoothed[0]
-    chron = np.argwhere(zeroed > np.max(zeroed) / 2).ravel()[0]
-    plt.plot(chron, trace_smoothed[chron], "rx")
-    return fig1, ax1
-
-
-def generate_isochron_map(vid, savgol_window=25, dt=1, prefilter=True):
-    """Generate image marking isochrons of wave propagation"""
-    chron = np.zeros(vid.shape[1:])
-    if prefilter:
-        smoothed_vid = np.apply_along_axis(
-            lambda x: signal.savgol_filter(x, savgol_window, 2), 0, vid
-        )
-    else:
-        smoothed_vid = vid
-
-    zeroed = smoothed_vid - smoothed_vid[0, :, :]
-    normed = zeroed / zeroed.max(axis=0)
-    hm_indices = np.apply_along_axis(find_half_max, 0, normed)
-    chron = hm_indices * dt * 1000
-    return chron
-
-
 def analyze_wave_dynamics(
     beta,
     dt,
@@ -1324,7 +1292,25 @@ def analyze_wave_dynamics(
     deltat=350,
     **isochrone_process_params,
 ):
-    """Measure spatiotemporal properties of wave propagation"""
+    """Measure spatiotemporal properties of wave propagation
+    
+    Args:
+        beta: 6-element array of beta parameters
+        dt: time step of data
+        um_per_px: microns per pixel
+        mask_function_tsmoothed: function to use for masking activation map to throw out bad regions
+            of video
+        deltax: spatial window size for local smoothing according to Bayly et al. 1999
+        deltat: temporal window size for local smoothing according to Bayly et al. 1999
+        isochrone_process_params: parameters to pass to process_isochrones
+    Returns:
+        results: tuple of (mean velocity, median velocity, LOI position according to halfmax xy, 
+            LOI position according to maximum upstroke velocity xy)
+        Tsmoothed: smoothed activation map according to halfmax method
+        Tsmoothed_dv: smoothed activation map according to maximum upstroke velocity method
+        divergence: divergence of velocity field
+        v: velocity field
+    """
 
     def default_mask(Ts, divergence):
         nan_mask = morphology.binary_dilation(
