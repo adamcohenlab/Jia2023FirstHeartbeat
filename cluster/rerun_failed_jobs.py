@@ -47,15 +47,18 @@ with open(filepath, "r") as jobs_file:
                         failed = True
                         causes[res[0]] = "mem"
             except FileNotFoundError:
-                pass
-
+                if os.path.exists(os.path.join(args.log_root, "myoutput_%d.out" % res[0])):
+                    pass
+                else:
+                    failed = True
+                    causes[res[0]] = "prolog"
             if failed:
                 failed_job_lines.append(line_counter)
             else:
                 successful_count += 1
                 try:
                     os.remove(os.path.join(args.log_root, "myerrors_%d.err" % res[0]))
-                    os.remove(os.path.join(args.log_root, "myoutput_%d.out" % res[0]))
+                    # os.remove(os.path.join(args.log_root, "myoutput_%d.out" % res[0]))
                 except FileNotFoundError:
                     # print("Could not find error file: %s" % os.path.join(args.log_root, "myerrors_%d.err" % res[0]))
                     pass
