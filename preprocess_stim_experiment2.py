@@ -11,9 +11,11 @@ import skimage.io as skio
 import numpy as np
 from skimage import exposure
 from scipy import signal
+import pickle
 from spikecounter.analysis import images, traces
 from spikecounter.analysis import stats as sstats
 from spikecounter import utils
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootdir", help="Root directory")
@@ -69,6 +71,9 @@ output_folder = Path(output_folder)
 
 
 expt_data = utils.load_video_metadata(rootdir, expt_name)
+expt_data["remove_from_start"] = remove_from_start
+expt_data["remove_from_end"] = remove_from_end
+np.savez_compressed(rootdir/expt_name/"output_data_py.npz", dd_compat_py=expt_data)
 if expt_data is None or "frame_counter" not in expt_data:
     logger.warning("No video metadata found, using default parameters")
     fs = args.fs

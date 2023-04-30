@@ -10,6 +10,8 @@ function metadata_to_py(folder)
     confocal_output_data = load_device_data(Device_Data, device_name="BU_2P");
     
     dd_compat_py = struct;
+    dd_compat_py.remove_from_start = 0;
+    dd_compat_py.remove_from_end = 0;
     dd_compat_py.dmds = {};
     dd_compat_py.cameras = {};
     
