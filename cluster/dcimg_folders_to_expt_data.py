@@ -24,7 +24,8 @@ for folder in os.listdir(rootpath):
                 if len(os.listdir(os.path.join(rootpath, folder))) > 0:
                     entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
             else:
-                entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
+                if os.path.splitext(folder)[1] in [".tif", ".tiff", ".jpg", ".png", ".jpeg"]:
+                    entries.append(("%02d:%02d:%02d" % (res['hh'], res['mm'], res['ss']), folder))
 
 print(entries)
 df = pd.DataFrame(entries, columns=["start_time", "file_name"])

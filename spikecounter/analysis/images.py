@@ -2406,3 +2406,16 @@ def crop_min_shape(
         diff_shape_im2[1] // 2 : diff_shape_im2[1] // 2 + min_shape[1],
     ]
     return cropped_im1, cropped_im2
+
+def extract_roi(img, x0, width, y0,  height):
+    """Extracts a region of interest from an image
+    Args:
+        img: Image to extract from
+        y0: Top left y coordinate
+        x0: Top left x coordinate
+        height: Height of ROI
+        width: Width of ROI
+    Returns:
+        Cropped image
+    """
+    return img[y0 : y0 + height, x0 : x0 + width]

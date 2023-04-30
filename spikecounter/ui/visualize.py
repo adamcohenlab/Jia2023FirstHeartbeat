@@ -443,90 +443,6 @@ def plot_wave_analysis(snr, rd, Tsmoothed, Tsmoothed_dv, divergence, v, title):
     return fig1, axes
 
 
-def get_custom_colormap(cmatrix, cmap_type):
-    if cmap_type == "continuous":
-        return mpl.colors.LinearSegmentedColormap.from_list("mp", cmatrix)
-    elif cmap_type == "categorical":
-        return mpl.colors.ListedColormap(cmatrix)
-
-
-def tol_bright(cmap_type="categorical"):
-    cmatrix = (
-        np.array(
-            [
-                [68, 119, 170],
-                [102, 204, 238],
-                [34, 136, 51],
-                [204, 187, 68],
-                [238, 102, 119],
-                [170, 51, 119],
-                [187, 187, 187],
-            ]
-        )
-        / 255
-    )
-    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
-
-
-def tol_vibrant(cmap_type="categorical"):
-    cmatrix = (
-        np.array(
-            [
-                [0, 119, 187],
-                [51, 187, 238],
-                [0, 153, 136],
-                [238, 119, 51],
-                [204, 51, 17],
-                [238, 51, 119],
-                [187, 187, 187],
-            ]
-        )
-        / 255
-    )
-    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
-
-
-def tol_light(cmap_type="categorical"):
-    cmatrix = (
-        np.array(
-            [
-                [119, 170, 221],
-                [153, 221, 255],
-                [68, 187, 153],
-                [187, 204, 51],
-                [170, 170, 0],
-                [238, 221, 136],
-                [238, 136, 102],
-                [255, 170, 187],
-                [221, 221, 221],
-            ]
-        )
-        / 255
-    )
-    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
-
-
-def draw_caret(point, width, height, axis, direction="down", facecolor="red"):
-    if direction == "up":
-        triangle_height = -height
-    else:
-        triangle_height = height
-
-    mark = patches.Polygon(
-        np.array(
-            [
-                point,
-                [point[0] - width / 2, point[1] + height],
-                [point[0] + width / 2, point[1] + height],
-            ]
-        ),
-        edgecolor=None,
-        facecolor=facecolor,
-        zorder=6,
-    )
-    axis.add_patch(mark)
-
-
 def plot_heatmap(df, value, index, column, ax, norm="lin", cax="auto"):
     """Take a pandas dataframe where each row is a unique datapoint,
     generate a pivot table, and turn into a heatmap.
@@ -548,6 +464,7 @@ def plot_heatmap(df, value, index, column, ax, norm="lin", cax="auto"):
     elif cax is not None:
         cbar = plt.colorbar(im, cax=cax)
     return ax, im, cbar
+
 
 
 def plot_pca_data(
@@ -635,28 +552,114 @@ def plot_pca_data(
 
 
 def plot_daq_traces(
-    matdata: Dict[str, Any], figsize: Tuple[float, float] = (12, 4)
-) -> Tuple[figure.Figure, axes.Axes]:
+    matdata: Dict[str, Any],
+    figsize: Tuple[float, float] = (12, 4),
+    ax: Optional[axes.Axes] = None,
+) -> List[axes.Axes]:
     """Plot the analog and digital traces from a DAQ file.
     Args:
         matdata: dictionary of data from a DAQ file.
     Returns:
         fig, axs
     """
-    fig, ax1 = plt.subplots(figsize=figsize)
-    ax2 = ax1.twinx()
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+    ax.spines["right"].set_visible(True)
+    ax2 = ax.twinx()
     dt_dict_analog, t_analog = utils.traces_to_dict(matdata, trace_types="aof")
     dt_dict_digital, t_digital = utils.traces_to_dict(matdata, trace_types="dof")
     for k, v in dt_dict_analog.items():
-        ax1.plot(t_analog, v, label=k)
+        ax.plot(t_analog, v, label=k)
     for k, v in dt_dict_digital.items():
         ax2.plot(t_digital, v, "--", label=k)
 
-    ax1.set_xlabel("Time (s)")
-    ax1.set_ylabel("Analog values")
+    ax.set_ylabel("Analog values")
     ax2.set_ylabel("Digital values")
-    
-    ax1.legend()
-    ax2.legend()
-    axs= [ax1, ax2]
-    return fig, axs
+    ax.legend(handles=ax.lines + ax2.lines, labels=[l.get_label() for l in ax.lines + ax2.lines])
+    axs = [ax, ax2]
+    return axs
+
+
+def get_custom_colormap(cmatrix, cmap_type):
+    if cmap_type == "continuous":
+        return mpl.colors.LinearSegmentedColormap.from_list("mp", cmatrix)
+    elif cmap_type == "categorical":
+        return mpl.colors.ListedColormap(cmatrix)
+
+
+def tol_bright(cmap_type="categorical"):
+    cmatrix = (
+        np.array(
+            [
+                [68, 119, 170],
+                [102, 204, 238],
+                [34, 136, 51],
+                [204, 187, 68],
+                [238, 102, 119],
+                [170, 51, 119],
+                [187, 187, 187],
+            ]
+        )
+        / 255
+    )
+    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
+
+
+def tol_vibrant(cmap_type="categorical"):
+    cmatrix = (
+        np.array(
+            [
+                [0, 119, 187],
+                [51, 187, 238],
+                [0, 153, 136],
+                [238, 119, 51],
+                [204, 51, 17],
+                [238, 51, 119],
+                [187, 187, 187],
+            ]
+        )
+        / 255
+    )
+    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
+
+
+def tol_light(cmap_type="categorical"):
+    cmatrix = (
+        np.array(
+            [
+                [119, 170, 221],
+                [153, 221, 255],
+                [68, 187, 153],
+                [187, 204, 51],
+                [170, 170, 0],
+                [238, 221, 136],
+                [238, 136, 102],
+                [255, 170, 187],
+                [221, 221, 221],
+            ]
+        )
+        / 255
+    )
+    return get_custom_colormap(cmatrix, cmap_type=cmap_type)
+
+
+def draw_caret(point, width, height, axis, direction="down", facecolor="red"):
+    if direction == "up":
+        triangle_height = -height
+    else:
+        triangle_height = height
+
+    mark = patches.Polygon(
+        np.array(
+            [
+                point,
+                [point[0] - width / 2, point[1] + height],
+                [point[0] + width / 2, point[1] + height],
+            ]
+        ),
+        edgecolor=None,
+        facecolor=facecolor,
+        zorder=6,
+    )
+    axis.add_patch(mark)
+

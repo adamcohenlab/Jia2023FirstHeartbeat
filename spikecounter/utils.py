@@ -13,6 +13,7 @@ from os import PathLike
 from datetime import datetime
 from typing import Union, Tuple, Dict, Any, Callable, Generator, Type, Iterable, Collection
 from collections.abc import Sequence
+import pickle
 
 import numpy as np
 from numpy import typing as npt
@@ -227,27 +228,30 @@ def extract_experiment_name(input_path):
 
 def load_video_metadata(
     root_dir: Union[str, PathLike],
-    expt_name: str,
+    expt_name: str
 ) -> Union[Dict[str, Any], None]:
     """Load and interpret metadata file from experiment folder
 
     Args:
         root_dir (str): path to experiment folder
         expt_name (str): name of experiment folder
-
     Returns:
         expt_data (Union[Dict[str, Any], None]): dictionary of experiment metadata
 
     """
-    metadata_path = Path(root_dir, expt_name, "output_data_py.mat")
-    if metadata_path.exists():
+    expt_path = Path(root_dir, expt_name)
+    if "output_data_py.npz" in os.listdir(expt_path):
+        metadata_path = expt_path/"output_data_py.npz"
+        expt_data = np.load(metadata_path, allow_pickle=True)["dd_compat_py"].item()
+    elif "output_data_py.mat" in os.listdir(expt_path):
+        metadata_path = expt_path/"output_data_py.mat"
         try:
             expt_data = mat73.loadmat(
-                os.path.join(root_dir, expt_name, "output_data_py.mat")
+                metadata_path
             )["dd_compat_py"]
         except TypeError:
             expt_data = scio.loadmat(
-                os.path.join(root_dir, expt_name, "output_data_py.mat")
+                metadata_path
             )["dd_compat_py"]
         except FileNotFoundError as err:
             warnings.warn(str(err))
@@ -591,22 +595,34 @@ def get_frame_times(
 
 def traces_to_dict(
     matdata: Dict[str, Any],
-    trace_types: Union[str, Iterable[str]] = "all"
+    trace_types: Union[str, Iterable[str]] = "all",
+    trim: bool = False
 ) -> Tuple[Dict[str, Any], npt.NDArray[np.floating]]:
     """Extract traces from DAQ data, synchronize to camera frames, and return as a dictionary.
     
     Args:
         matdata: Dictionary of DAQ data (derived using load_video_metadata).
         trace_types: Trace types to extract. If "all", all traces are extracted.
+        trim: whether to trim the traces according to the information provided in the metadata
     Returns:
         Dictionary of traces, and array of frame times in seconds.
     """
+    # Convert trace_types to list if necessary
     if trace_types != "all":
-        trace_types = make_iterable(trace_types)
+        trace_types = list(make_iterable(trace_types))
 
-    # Find daq indices where camera frames were acquired
+    # Find DAQ indices where camera frames were acquired
     rising_edges = np.argwhere(np.diff(matdata["frame_counter"]) == 1).ravel()
     t = rising_edges / matdata["clock_rate"]
+    if trim:
+        start_idx = matdata["remove_from_start"]
+        end_idx = len(t) - matdata["remove_from_end"]
+    else:
+        start_idx = 0
+        end_idx = len(t)
+    t = t[start_idx:end_idx]
+    t -= t[0]
+    
     if isinstance(matdata["task_traces"], dict):
         trace_groups = [matdata["task_traces"]]
     else:
@@ -625,12 +641,13 @@ def traces_to_dict(
             for j in range(len(rising_edges)):
                 if j == 0:
                     dt_dict[traces["name"]][j] = np.max(
-                        traces["values"][: rising_edges[j]]
+                        traces["values"][:rising_edges[j]]
                     )
                 else:
                     dt_dict[traces["name"]][j] = np.max(
                         traces["values"][rising_edges[j - 1] : rising_edges[j]]
                     )
+            dt_dict[traces["name"]] = dt_dict[traces["name"]][start_idx:end_idx]
         else:
             for i in range(len(traces["name"])):
                 dt_dict[traces["name"][i]] = np.zeros_like(rising_edges, dtype=float)
@@ -643,6 +660,7 @@ def traces_to_dict(
                         dt_dict[traces["name"][i]][j] = np.max(
                             traces["values"][i][rising_edges[j - 1] : rising_edges[j]]
                         )
+                dt_dict[traces["name"][i]] = dt_dict[traces["name"][i]][start_idx:end_idx]
     return dt_dict, t
 
 
