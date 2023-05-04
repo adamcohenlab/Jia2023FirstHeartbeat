@@ -9,7 +9,7 @@ rootpath = args.rootpath
 
 for folder in os.listdir(rootpath):
     fullpath = os.path.join(rootpath, folder)
-    if "output_data_py.mat" in os.listdir(fullpath):
+    if os.path.isdir(fullpath) and "output_data_py.mat" in os.listdir(fullpath):
         sh_line = ["sbatch", "SpikeCounter/cluster/register_dualcam.sh", 
                     rootpath, folder, os.path.join(rootpath, "analysis", "tform_flipud.npz")]
         print(sh_line)

@@ -9,7 +9,7 @@ parser.add_argument("rootpath", type=str)
 parser.add_argument("crosstalk_channel", type=str)
 parser.add_argument("--expt_info", type=str, default="analysis/experiment_data.csv")
 parser.add_argument(
-    "--initial_subfolder", help="Subfolder for initial data", default=""
+    "--initial_subfolder", help="Subfolder for initial data", default="None"
 )
 parser.add_argument("--output_dir", default=None)
 parser.add_argument("--scale_factor", type=int, default=2)
@@ -58,7 +58,7 @@ for i in range(expt_info.shape[0]):
     f = expt_info.iloc[i]["file_name"]
     sh_line = [
         "sbatch",
-        SPIKECOUNTER_PATH + "cluster/preprocess_stim2.sh",
+        SPIKECOUNTER_PATH + "/cluster/preprocess_stim2.sh",
         rootpath,
         f,
         args.crosstalk_channel,

@@ -37,12 +37,13 @@ parser.add_argument("file_name", type=str)
 parser.add_argument("--plot", default=True, type=utils.str2bool)
 parser.add_argument("--um_per_px", default=0.265 * 4, type=float)
 parser.add_argument("--hard_cutoff", default=0.005, type=float)
-parser.add_argument("--downsample_factor", default=16, type=int)
+parser.add_argument("--downsample_factor", default=8, type=int)
 parser.add_argument("--window_size_s", default=4, type=float)
 parser.add_argument("--sta_before_s", default=2, type=float)
 parser.add_argument("--sta_after_s", default=5, type=float)
 parser.add_argument("--frame_start", default=0, type=int)
 parser.add_argument("--frame_end", default=0, type=int)
+parser.add_argument("--invert_dFF", default=True, type=utils.str2bool)
 args = parser.parse_args()
 
 rootdir = Path(args.rootdir)
@@ -54,6 +55,8 @@ matplotlib.use("Agg")
 plt.style.use(Path(SPIKECOUNTER_PATH, "config", "bio_publications.mplstyle"))
 
 logger = utils.initialize_logging(rootdir / file_name)
+plt.set_loglevel("warning")
+
 logger.info(
     "PERFORM ANALYSIS OF SIMULTANEOUS VOLTAGE AND CALCIUM IMAGING DATA USING \
     analyze_simultaneous_voltage_calcium.py"
@@ -118,7 +121,7 @@ logger.info("Calculating dFF from voltage imaging data")
 v_dFF = (
     images.get_image_dFF(
         ndimage.gaussian_filter(multi_regressed_v, (2, 3, 3)).astype(np.float32),
-        invert=True,
+        invert=args.invert_dFF,
     )
     - 1
 )
@@ -131,6 +134,10 @@ skio.imsave(
 logger.info("Performing PCA denoising on voltage imaging data")
 rd = v_dFF.reshape(v_dFF.shape[0], -1).T
 u, s, v = randomized_svd(rd, n_components=15)
+pc1_v = np.abs(u[:, 0].reshape(v_dFF.shape[1:]))
+pc1_v_mask = pc1_v > filters.threshold_otsu(pc1_v)
+skio.imsave(output_datadir / f"{file_name}_PC1_v.tif", pc1_v.astype(np.float32))
+skio.imsave(output_datadir / f"{file_name}_PC1_v_mask.tif", pc1_v_mask.astype(np.uint8))
 
 if args.plot:
     plt.close("all")
@@ -201,9 +208,18 @@ rd = ca_dFF.reshape(ca_dFF.shape[0], -1).T
 u, s, v = randomized_svd(rd, n_components=15)
 pc1 = np.abs(u[:, 0].reshape(ca_dFF.shape[1:]))
 pc1_mask = pc1 > filters.threshold_otsu(pc1)
+skio.imsave(output_datadir / f"{file_name}_PC1_ca.tif", pc1.astype(np.float32))
+skio.imsave(output_datadir / f"{file_name}_PC1_ca_mask.tif", pc1_mask.astype(np.uint8))
+
+# Get average traces for regions associated with first PC of calcium activity
 ca_trace = images.extract_mask_trace(ca_dFF, pc1_mask)
 ca_trace_smoothed = ndimage.gaussian_filter(ca_trace, 2)
 v_trace = images.extract_mask_trace(v_dFF, pc1_mask)
+
+# Get average traces for regions associated with first PC of voltage activity
+ca_trace_v = images.extract_mask_trace(ca_dFF, pc1_v_mask)
+v_trace_v = images.extract_mask_trace(v_dFF, pc1_v_mask)
+
 
 logger.info("Detecting peaks in calcium trace for triggered averages")
 pks, props = signal.find_peaks(
@@ -304,6 +320,11 @@ else:
     sta_corr = signal.correlate(mask_trace_sta_v, mask_trace_sta_c)
     ca_lag = np.argmax(sta_corr) - mask_trace_sta_v.size + 1
 
+np.savez(output_datadir/"traces.npz", 
+         ca_trace=ca_trace, v_trace=v_trace, 
+         ca_lag=ca_lag, ca_trace_v = ca_trace_v, v_trace_v = v_trace_v)
+
+    
 if args.plot:
     logger.info("Plotting results of triggered averaging analysis")
     t_sta = np.arange(-sta_before, sta_after) * mean_dt

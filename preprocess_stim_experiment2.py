@@ -23,7 +23,7 @@ parser.add_argument("exptname", help="Experiment Name")
 parser.add_argument("crosstalk_channel", help="Channel of crosstalk source")
 parser.add_argument("--output_folder", help="Output folder for results", default=None)
 parser.add_argument(
-    "--initial_subfolder", help="Subfolder for initial data", default=""
+    "--initial_subfolder", help="Subfolder for initial data", default="None"
 )
 parser.add_argument(
     "--scale_factor", help="Scale factor for downsampling", default=2, type=int
@@ -94,7 +94,10 @@ for d in ["downsampled", "stim_frames_removed", "corrected", "denoised"]:
 
 if args.start_from_downsampled != 1:
     logger.info(f"Loading image from subfolder {args.initial_subfolder}")
-    img, _ = images.load_image(rootdir, expt_name, subfolder=args.initial_subfolder, cam_indices=0)
+    if args.initial_subfolder != "None":
+        img, _ = images.load_image(rootdir, expt_name, subfolder=args.initial_subfolder, cam_indices=0)
+    else:
+        img, _ = images.load_image(rootdir, expt_name, cam_indices=0)
     logger.info(f"Loaded image of dimensions {img.shape}")
 
     trimmed = img[remove_from_start : img.shape[0] - remove_from_end]

@@ -793,6 +793,7 @@ def process_isochrones(
     amplitude_artifact_cutoff: float = 2.5,
     dilation_size: int = 0,
     valid_mask: Optional[npt.NDArray[np.bool_]] = None,
+    t_pctile_cutoffs = (0,100)
 ) -> Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
     """Clean up spline fitting to better visualize isochrones: get rid of nans and low-amplitude
     values
@@ -819,7 +820,7 @@ def process_isochrones(
     Raises:
         ValueError: if threshold_mode is invalid
     """
-
+    print(threshold_mode)
     if threshold_mode == "amplitude":
         amplitude = beta[2, :, :]
     elif threshold_mode == "snr":  # calculate SNR (power)
@@ -841,6 +842,8 @@ def process_isochrones(
             intensity_mask = np.ones_like(amplitude, dtype=bool)
 
         mask = (amplitude_nanr > threshold) & intensity_mask
+        fig1, ax1 = plt.subplots(figsize=(4,4))
+        ax1.imshow(mask)
         if opening_size > 0:
             mask = morphology.binary_opening(
                 mask, footprint=morphology.disk(opening_size)
@@ -872,6 +875,10 @@ def process_isochrones(
 
     hm = beta[1, :, :]
     dv = beta[4, :, :]
+    t_cutoff_hm = np.nanpercentile(hm, t_pctile_cutoffs)
+    t_cutoff_dv = np.nanpercentile(hm, t_pctile_cutoffs)
+    hm[(hm<t_cutoff_hm[0])|(hm>t_cutoff_hm[1])] = np.nan
+    dv[(dv<t_cutoff_dv[0])|(dv>t_cutoff_dv[1])] = np.nan
     # Replace NaNs with the mean of valid surrounding pixels
     hm_nans_removed = remove_nans(hm, kernel_size=13)
     dv_nans_removed = remove_nans(dv, kernel_size=13)
@@ -982,7 +989,7 @@ def estimate_local_velocity(
         n_points_fit: 2D array of number of points used for local polynomial fitting at each pixel
     """
     X, Y = np.meshgrid(
-        np.arange(activation_times.shape[0]), np.arange(activation_times.shape[1])
+        np.arange(activation_times.shape[1]), np.arange(activation_times.shape[0])
     )
     coords = np.array([Y.ravel(), X.ravel()]).T
     t_smoothed = np.empty_like(activation_times)
@@ -1290,6 +1297,7 @@ def analyze_wave_dynamics(
     mask_function_tsmoothed=None,
     deltax=9,
     deltat=350,
+    threshold_mode="snr",
     **isochrone_process_params,
 ):
     """Measure spatiotemporal properties of wave propagation
@@ -1322,7 +1330,7 @@ def analyze_wave_dynamics(
     if mask_function_tsmoothed is None:
         mask_function_tsmoothed = default_mask
     hm_nan, dv_max_nan = process_isochrones(
-        beta, dt, threshold_mode="snr", **isochrone_process_params
+        beta, dt, threshold_mode=threshold_mode, **isochrone_process_params
     )
     if np.sum(~np.isnan(hm_nan)) == 0:
         return None

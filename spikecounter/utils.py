@@ -87,11 +87,11 @@ def initialize_logging(
     formatter = logging.Formatter(
         "%(asctime)s:%(levelname)s; %(message)s", "%Y-%m-%d %H:%M:%S"
     )
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     logging.captureWarnings(capture_warnings)
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     logger.addHandler(file_handler)
     return logger
 
