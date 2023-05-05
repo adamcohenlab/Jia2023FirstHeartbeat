@@ -1682,7 +1682,7 @@ def identify_hearts(
 
         corr_mask = morphology.binary_opening(
             np.max(corr_img > corr_threshold, axis=0),
-            selem=np.ones((opening_size, opening_size)),
+            selem=morphology.disk(opening_size),
         )
         new_mask = morphology.binary_dilation(
             corr_mask, selem=morphology.disk(dilation_size)
