@@ -5,6 +5,7 @@ from sklearn.utils.extmath import randomized_svd
 import numpy as np
 import matplotlib.pyplot as plt
 from numpy import typing as npt
+from numba import njit
 from typing import Tuple, Optional, Union, List, Dict, Any, Callable, Collection
 from collections.abc import Sequence
 
@@ -374,7 +375,7 @@ def trajectory_variability_kde(x, y, nsamples=100, bandwidth=1, pady=0):
 
     return x_samples, mean_y, std_y
 
-
+@njit
 def multi_regress(
     data_matrix: npt.NDArray[Union[np.integer, np.floating]],
     traces: npt.NDArray[Union[np.integer, np.floating]],

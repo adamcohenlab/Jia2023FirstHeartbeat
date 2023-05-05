@@ -22,6 +22,7 @@ import warnings
 
 import numpy as np
 from numpy import typing as npt
+from numba import njit
 
 from scipy import signal, stats, interpolate, optimize, ndimage
 from scipy.fft import fft, fftfreq
@@ -1167,7 +1168,7 @@ def correct_photobleach(
         amplitude = (max_val - min_val) / (1 - np.exp(params[1] * dur))
         amplitude[~np.isfinite(amplitude)] = 0
         amplitude = np.maximum(amplitude, 0)
-        amplitude = filters.median(amplitude, selem=morphology.disk(7))
+        amplitude = filters.median(amplitude, footprint=morphology.disk(7))
         amplitude[amplitude / params[0] * pbleach[-1] > background_level] = 0
 
         # Correct each pixel by the photobleaching trace (only if the amplitude is large enough)
@@ -1322,7 +1323,7 @@ def analyze_wave_dynamics(
 
     def default_mask(Ts, divergence):
         nan_mask = morphology.binary_dilation(
-            np.pad(np.isnan(Ts), 1, constant_values=True), selem=morphology.disk(3)
+            np.pad(np.isnan(Ts), 1, constant_values=True), footprint=morphology.disk(3)
         )
 
         return np.ma.masked_array(Ts, nan_mask[1:-1, 1:-1] | (divergence < 0.5))
@@ -1408,7 +1409,7 @@ def get_image_dff_corrected(img, nsamps_corr, mask=None, plot=None, full_output=
         mask = mean_img > np.percentile(mean_img, 80)
         kernel_size = int(mask.shape[0] / 50)
         mask = morphology.binary_closing(
-            mask, selem=np.ones((kernel_size, kernel_size))
+            mask, footprint=morphology.disk(kernel_size//2)
         )
 
     if plot is not None:
@@ -1442,7 +1443,7 @@ def image_to_peaks(
         mask = mean_img > np.percentile(mean_img, 80)
         kernel_size = int(mask.shape[0] / 50)
         mask = morphology.binary_closing(
-            mask, selem=np.ones((kernel_size, kernel_size))
+            mask, footprint=morphology.disk(kernel_size//2)
         )
 
     sos = signal.butter(5, f_c, btype="lowpass", output="sos", fs=fs)
@@ -1682,10 +1683,10 @@ def identify_hearts(
 
         corr_mask = morphology.binary_opening(
             np.max(corr_img > corr_threshold, axis=0),
-            selem=morphology.disk(opening_size),
+            footprint=morphology.disk(opening_size),
         )
         new_mask = morphology.binary_dilation(
-            corr_mask, selem=morphology.disk(dilation_size)
+            corr_mask, footprint=morphology.disk(dilation_size)
         )
     new_mask_labels = measure.label(new_mask)
     coms = ndimage.center_of_mass(
@@ -1698,7 +1699,7 @@ def identify_hearts(
     # print(coms.shape)
     return new_mask_labels, coms
 
-
+@njit
 def segment_by_frequency_band(
     img,
     band_bounds,
@@ -1721,19 +1722,19 @@ def segment_by_frequency_band(
         intensity_mask = manual_intensity_mask
 
     pixelwise_fft = fft(zeroed_image, axis=0)
-    N_samps = img.shape[0]
-    fft_freq = fftfreq(N_samps, 1 / f_s)[: N_samps // 2]
-    abs_power = np.abs(pixelwise_fft[: N_samps // 2, :, :]) ** 2
+    n_samps = img.shape[0]
+    fft_freq = fftfreq(n_samps, 1 / f_s)[: n_samps // 2]
+    abs_power = np.abs(pixelwise_fft[: n_samps // 2, :, :]) ** 2
     norm_abs_power = abs_power / np.sum(abs_power, axis=0)
     band_power = np.sum(
         norm_abs_power[(fft_freq > band_bounds[0]) & (fft_freq < band_bounds[1]), :, :],
         axis=0,
     )
     smoothed_band_power = filters.median(
-        band_power, selem=np.ones((5, 5))
+        band_power, footprint=morphology.disk(2)
     ) * intensity_mask.astype(int)
     processed_band_power = morphology.binary_opening(
-        (smoothed_band_power > band_threshold), selem=np.ones((3, 3))
+        (smoothed_band_power > band_threshold), footprint=morphology.disk(1)
     )
     return measure.label(processed_band_power)
 
@@ -1925,8 +1926,7 @@ def refine_segmentation_pca(img, rois, n_components=10, threshold_percentile=70)
             roi_indices = roi_indices[roi_indices != 0]
             mask = rois == roi_indices[region_idx]
 
-        selem = np.ones((3, 3), dtype=bool)
-        mask = morphology.binary_opening(mask, selem)
+        mask = morphology.binary_opening(mask, footprint=morphology.disk(1))
         region_masks.append(mask)
 
     return region_masks
