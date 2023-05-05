@@ -1,5 +1,5 @@
 """Functions for performing statistical analysis on data."""
-from scipy import stats, interpolate, optimize
+from scipy import stats, interpolate, optimize, signal
 from sklearn import neighbors
 from sklearn.utils.extmath import randomized_svd
 import numpy as np
@@ -401,7 +401,7 @@ def multi_regress(
     else:
         I = tr.astype(np.float32)
 
-    C = np.linalg.inv(I@ I.T) @ I @ data_matrix
+    C = np.linalg.inv(I @ I.T) @ I @ data_matrix
     resid = data_matrix - I.T @ C
 
     if regress_dc:
@@ -409,6 +409,7 @@ def multi_regress(
     else:
         dc = np.zeros_like(data_matrix)
     return dc + resid
+
 
 def fit_sigmoid(xs, ys, fixed_amplitude=None):
     if fixed_amplitude:
@@ -423,3 +424,50 @@ def fit_sigmoid(xs, ys, fixed_amplitude=None):
 
     popt, _ = optimize.curve_fit(sigmoid, xs, ys)
     return popt
+
+
+def calculate_local_corrs(
+    x1: npt.NDArray[np.number], x2: npt.NDArray[np.number], ws: int
+) -> npt.NDArray[np.number]:
+    """ Calculate Pearson correlation coefficient between two time series over a sliding window
+
+    Args:
+        x1: First time series
+        x2: Second time series
+        ws: Window size
+    Returns:
+        Correlation coefficients
+    """
+    # Define convolution kernels
+    ma_kernel = np.ones((1, ws)) / ws
+    sum_kernel = np.ones((1, ws))
+
+    # Pad the arrays and perform moving average
+    x1_padded = np.pad(x1, ((0, 0), (ws // 2, ws // 2)), mode="wrap")
+    x2_padded = np.pad(x2, ((0, 0), (ws // 2, ws // 2)), mode="wrap")
+    x1_ma = signal.convolve(x1_padded, ma_kernel, mode="valid")
+    x2_ma = signal.convolve(x2_padded, ma_kernel, mode="valid")
+    x1_sum = signal.convolve(x1_padded, sum_kernel, mode="valid")
+    x2_sum = signal.convolve(x2_padded, sum_kernel, mode="valid")
+
+    # Calculate the numerator and denominator of Pearson R coefficient
+    num = (
+        signal.convolve(x1_padded * x2_padded, sum_kernel, mode="valid")
+        + x1_ma * x2_ma * ws
+        - x1_ma * x2_sum
+        - x2_ma * x1_sum
+    )
+    x1_m_moment2 = (
+        x1_ma**2 * ws
+        - 2 * x1_sum * x1_ma
+        + signal.convolve(x1_padded**2, sum_kernel, mode="valid")
+    )
+    x2_m_moment2 = (
+        x2_ma**2 * ws
+        - 2 * x2_sum * x2_ma
+        + signal.convolve(x2_padded**2, sum_kernel, mode="valid")
+    )
+    den = np.sqrt(x1_m_moment2 * x2_m_moment2)
+
+    # Calculate the local correlation coefficients
+    return num / den

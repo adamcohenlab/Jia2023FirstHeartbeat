@@ -803,7 +803,7 @@ def get_sta(
     spike_traces = get_spike_traces(trace, peak_indices, bounds, normalize_height)
 
     if len(peak_indices) == 0:
-        sta = np.nan * np.ones(before + after)
+        sta = np.nan * np.ones(np.sum(bounds))
     else:
         if use_median:
             sta = np.nanmedian(spike_traces, axis=0)
