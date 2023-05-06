@@ -1699,7 +1699,7 @@ def identify_hearts(
     # print(coms.shape)
     return new_mask_labels, coms
 
-@njit
+
 def segment_by_frequency_band(
     img,
     band_bounds,

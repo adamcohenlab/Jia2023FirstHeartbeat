@@ -375,7 +375,6 @@ def trajectory_variability_kde(x, y, nsamples=100, bandwidth=1, pady=0):
 
     return x_samples, mean_y, std_y
 
-@njit
 def multi_regress(
     data_matrix: npt.NDArray[Union[np.integer, np.floating]],
     traces: npt.NDArray[Union[np.integer, np.floating]],

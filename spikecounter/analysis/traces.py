@@ -592,7 +592,8 @@ def analyze_peaks(
     else:
         p = prominence
     if threshold == "auto":
-        t = np.nanpercentile(trace, auto_thresh_pct) * auto_thresh_scale
+        pct_baseline, pct_ref = np.nanpercentile(trace, [5, auto_thresh_pct])
+        t = pct_baseline + (pct_ref - pct_baseline)*auto_thresh_scale
     else:
         t = threshold
 
