@@ -35,14 +35,14 @@ parser.add_argument(
 parser.add_argument(
     "--remove_from_end", help="Time indices to trim from end", default=0, type=int
 )
-parser.add_argument("--start_from_downsampled", default=0, type=int)
+parser.add_argument("--start_from_downsampled", default=False, type=utils.str2bool)
 parser.add_argument("--pb_correct_method", default="localmin", type=str)
 parser.add_argument("--pb_correct_mask", default="None", type=str)
 parser.add_argument("--filter_skewness", default=True, type=utils.str2bool)
 parser.add_argument("--skewness_threshold", default=2, type=float)
 parser.add_argument("--left_shoulder", default=16, type=float)
 parser.add_argument("--right_shoulder", default=19, type=float)
-parser.add_argument("--invert", default=0, type=int)
+parser.add_argument("--invert", default=False, type=utils.str2bool)
 parser.add_argument("--lpad", default=0, type=int)
 parser.add_argument("--rpad", default=0, type=int)
 parser.add_argument("--fs", default=10.2, type=float)
@@ -61,7 +61,7 @@ n_pcs = args.n_pcs
 remove_from_start = args.remove_from_start
 remove_from_end = args.remove_from_end
 
-logger = utils.initialize_logging(rootdir/expt_name)
+logger = utils.initialize_logging(rootdir / expt_name)
 logger.info(f"STARTING PREPROCESSING USING preprocess_stim_experiment2.py")
 logger.info(f"Arguments: \n {str(args)}")
 
@@ -71,10 +71,8 @@ output_folder = Path(output_folder)
 
 
 expt_data = utils.load_video_metadata(rootdir, expt_name)
-expt_data["remove_from_start"] = remove_from_start
-expt_data["remove_from_end"] = remove_from_end
-np.savez_compressed(rootdir/expt_name/"output_data_py.npz", dd_compat_py=expt_data)
-if expt_data is None or "frame_counter" not in expt_data:
+
+if not expt_data or "frame_counter" not in expt_data:
     logger.warning("No video metadata found, using default parameters")
     fs = args.fs
     trace_dict = None
@@ -82,20 +80,26 @@ else:
     trace_dict, t = utils.traces_to_dict(expt_data)
     dt_frame = np.mean(np.diff(t))
     fs = 1 / dt_frame
+    
+expt_data["remove_from_start"] = remove_from_start
+expt_data["remove_from_end"] = remove_from_end
+np.savez_compressed(rootdir / expt_name / "output_data_py.npz", dd_compat_py=expt_data)
 
 # Make new subfolders
 output_folders = {}
 for d in ["downsampled", "stim_frames_removed", "corrected", "denoised"]:
-    if args.initial_subfolder != "None": # pylint: disable=no-member
-        output_folders[d] = output_folder/f"{args.initial_subfolder}_{d}"
+    if args.initial_subfolder != "None":  # pylint: disable=no-member
+        output_folders[d] = output_folder / f"{args.initial_subfolder}_{d}"
     else:
-        output_folders[d] = output_folder/d
+        output_folders[d] = output_folder / d
     os.makedirs(output_folders[d], exist_ok=True)
 
 if args.start_from_downsampled != 1:
     logger.info(f"Loading image from subfolder {args.initial_subfolder}")
     if args.initial_subfolder != "None":
-        img, _ = images.load_image(rootdir, expt_name, subfolder=args.initial_subfolder, cam_indices=0)
+        img, _ = images.load_image(
+            rootdir, expt_name, subfolder=args.initial_subfolder, cam_indices=0
+        )
     else:
         img, _ = images.load_image(rootdir, expt_name, cam_indices=0)
     logger.info(f"Loaded image of dimensions {img.shape}")
@@ -106,16 +110,14 @@ if args.start_from_downsampled != 1:
     if scale_factor > 1:
         downsampled = images.downsample_video(trimmed, scale_factor)
         skio.imsave(
-            output_folders["downsampled"]/f"{expt_name}.tif",
+            output_folders["downsampled"] / f"{expt_name}.tif",
             np.round(downsampled).astype(np.uint16),
         )
     else:
         downsampled = trimmed
 else:
-    logger.info("Starting from downsampled")
-    downsampled = skio.imread(
-        output_folders["downsampled"]/f"{expt_name}.tif"
-    )
+    logger.info("Starting from downsampled image")
+    downsampled = skio.imread(output_folders["downsampled"] / f"{expt_name}.tif")
 
 downsampled = downsampled.astype(np.float32) - args.bg_const
 
@@ -156,10 +158,11 @@ if args.decorrelate:
         cutoff = np.percentile(mean_img, float(args.decorr_pct))
         decorr_trace = stim_frames_removed[:, mean_img < cutoff].mean(axis=1)
     stim_frames_removed = (
-        images.regress_video(stim_frames_removed, decorr_trace, regress_dc=False) + mean_img
+        images.regress_video(stim_frames_removed, decorr_trace, regress_dc=False)
+        + mean_img
     )
 skio.imsave(
-    output_folders["stim_frames_removed"]/f"{expt_name}.tif",
+    output_folders["stim_frames_removed"] / f"{expt_name}.tif",
     stim_frames_removed,
 )
 if args.pb_correct_method == "None":
@@ -183,9 +186,7 @@ pb_corrected_img = exposure.rescale_intensity(
     ),
     out_range=np.uint16,
 )
-skio.imsave(
-    output_folders["corrected"]/f"{expt_name}.tif", pb_corrected_img
-)
+skio.imsave(output_folders["corrected"] / f"{expt_name}.tif", pb_corrected_img)
 
 if args.denoise == 0:
     logger.info("No denoising, exiting")
@@ -224,6 +225,6 @@ denoised = denoised.reshape(downsampled.shape)
 denoised += mean_img
 
 skio.imsave(
-    output_folders["denoised"]/f"{expt_name}.tif",
+    output_folders["denoised"] / f"{expt_name}.tif",
     exposure.rescale_intensity(denoised, out_range=np.uint16),
 )

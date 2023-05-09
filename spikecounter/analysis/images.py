@@ -970,8 +970,7 @@ def estimate_local_velocity(
     debug: bool = False,
     weights: Optional[npt.NDArray[np.floating]] = None,
 ) -> Union[
-    Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]],
-    Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]],
+    Tuple[npt.NDArray[np.floating], npt.NDArray[np.floating], Optional[npt.NDArray[np.floating]]],
 ]:
     """Use local polynomial fitting strategy from Bayley et al. 1998 to determine velocity from
     activation map
@@ -1068,7 +1067,7 @@ def estimate_local_velocity(
     if debug:
         return v, t_smoothed, n_points_fit
     else:
-        return v, t_smoothed
+        return v, t_smoothed, None
 
 
 def correct_photobleach(
@@ -1292,15 +1291,15 @@ def spike_triggered_average_video(
         return sta, None
 
 def analyze_wave_dynamics(
-    beta,
-    dt,
-    um_per_px,
-    mask_function_tsmoothed=None,
-    deltax=9,
-    deltat=350,
-    threshold_mode="snr",
+    beta: npt.NDArray[np.floating],
+    dt: float,
+    um_per_px: float,
+    mask_function_tsmoothed: Optional[Callable] = None,
+    deltax: int = 9,
+    deltat: float = 350,
+    threshold_mode: str = "snr",
     **isochrone_process_params,
-):
+) -> Optional[Tuple[Tuple[float, float, float, float, float, float], npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]]]:
     """Measure spatiotemporal properties of wave propagation
     
     Args:
@@ -1321,39 +1320,56 @@ def analyze_wave_dynamics(
         v: velocity field
     """
 
-    def default_mask(Ts, divergence):
+    def default_mask(activation_times: npt.NDArray[np.floating], divergence: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        """ Default mask function for masking activation map to throw out bad regions of video
+        
+        Throw out nan values and regions where divergence of velocity is too low.
+
+        Args:
+            activation_times: npt.NDArray[np.floating]: activation:  map
+            divergence: divergence of velocity field
+        Returns:
+            masked activation map
+        """
         nan_mask = morphology.binary_dilation(
-            np.pad(np.isnan(Ts), 1, constant_values=True), footprint=morphology.disk(3)
+            np.pad(np.isnan(activation_times), 1, constant_values=True), footprint=morphology.disk(3)
         )
 
-        return np.ma.masked_array(Ts, nan_mask[1:-1, 1:-1] | (divergence < 0.5))
+        return np.ma.masked_array(activation_times, nan_mask[1:-1, 1:-1] | (divergence < 0.5))
 
     if mask_function_tsmoothed is None:
         mask_function_tsmoothed = default_mask
+
+    # Clean up activation map derived from spline_timing()
     hm_nan, dv_max_nan = process_isochrones(
         beta, dt, threshold_mode=threshold_mode, **isochrone_process_params
     )
     if np.sum(~np.isnan(hm_nan)) == 0:
         return None
+    # Smooth out activation map and estimate velocity field using mapping algorithm from Bayly et al. 1999
     snr = np.nan_to_num((np.abs(beta[2] - 1) / beta[5]) ** 2)
-    _, Tsmoothed = estimate_local_velocity(
+    _, Tsmoothed, _ = estimate_local_velocity(
         hm_nan, deltax=deltax, deltay=deltax, deltat=deltat, weights=snr
     )
-    v, Tsmoothed_dv = estimate_local_velocity(
+    v, Tsmoothed_dv, _ = estimate_local_velocity(
         dv_max_nan, deltax=deltax, deltay=deltax, deltat=deltat, weights=snr
     )
+    # Convert velocity field to microns per second
     v *= um_per_px * 1000
+    # Get summary metrics of velocity field
     abs_vel = np.linalg.norm(v, axis=0)
     mean_velocity = np.nanmean(abs_vel.ravel())
     median_velocity = np.nanmedian(abs_vel.ravel())
     divergence = utils.div(v / abs_vel)
-
+    # Mask activation map to throw out bad regions of video
     masked_tsmoothed = mask_function_tsmoothed(Tsmoothed, divergence)
     masked_tsmoothed_dv = mask_function_tsmoothed(Tsmoothed_dv, divergence)
 
+    # Find locus of intiation according to halfmax activation map
     min_activation_time = np.unravel_index(
         np.ma.argmin(masked_tsmoothed), Tsmoothed.shape
     )
+    # Find locus of initiation according to maximum upstroke velocity activation map
     min_activation_time_dv = np.unravel_index(
         np.ma.argmin(masked_tsmoothed_dv), Tsmoothed_dv.shape
     )

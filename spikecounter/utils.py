@@ -229,7 +229,7 @@ def extract_experiment_name(input_path):
 def load_video_metadata(
     root_dir: Union[str, PathLike],
     expt_name: str
-) -> Union[Dict[str, Any], None]:
+) -> Dict[str, Any]:
     """Load and interpret metadata file from experiment folder
 
     Args:
@@ -255,7 +255,7 @@ def load_video_metadata(
             )["dd_compat_py"]
         except FileNotFoundError as err:
             warnings.warn(str(err))
-            expt_data = None
+            expt_data = {}
     else:
         metadata_path = Path(root_dir, expt_name, "experimental_parameters.txt")
         try:
@@ -269,7 +269,7 @@ def load_video_metadata(
                 )
         except FileNotFoundError as err:
             warnings.warn(str(err))
-            expt_data = None
+            expt_data = {}
     return expt_data
 
 
