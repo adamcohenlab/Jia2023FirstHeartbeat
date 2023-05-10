@@ -23,7 +23,7 @@ parser.add_argument(
     "--output_folder", help="Output folder for results", default="None", type=str
 )
 parser.add_argument(
-    "--scale_factor", help="Scale factor for downsampling", default=2, type=float
+    "--scale_factor", help="Scale factor for downsampling", default=2, type=int
 )
 parser.add_argument("--n_pcs", help="Number of PCs to keep", default=50, type=int)
 parser.add_argument("--pb_correct_method", default="localmin", type=str)
@@ -81,9 +81,9 @@ else:
 if args.crosstalk_mask == "None":
     crosstalk_mask = None
 else:
+    logger.info(f"Loading spatial mask for identifying crosstalk from {args.crosstalk_mask}")
     crosstalk_mask = skio.imread(args.crosstalk_mask) > 0
     crosstalk_mask = crosstalk_mask[:: int(scale_factor), :: int(scale_factor)]
-    print(crosstalk_mask.shape)
 
 if output_folder == "None":
     output_folder = rootdir
@@ -111,7 +111,6 @@ if args.start_from_downsampled != 1:
     logger.info(f"Downsampling by factor {scale_factor}")
     if scale_factor > 1:
         downsampled = images.downsample_video(trimmed, scale_factor)
-        print(downsampled.shape)
         skio.imsave(
             output_folder / "downsampled" / f"{expt_name}.tif",
             np.round(downsampled).astype(np.uint16),
@@ -238,7 +237,7 @@ for subfolder in ["stim_frames_removed", "denoised", "corrected"]:
     )
     with open(
         output_folder
-        / "{subfolder}/analysis/stim_indices/{expt_name}_stim_indices.pickle",
+        /f"{subfolder}/analysis/stim_indices/{expt_name}_stim_indices.pickle",
         "wb",
     ) as f:
         pickle.dump(t_mask, f)

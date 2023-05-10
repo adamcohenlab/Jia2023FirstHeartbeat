@@ -20,10 +20,10 @@ parser.add_argument("--upper", type=int, default=0)
 parser.add_argument("--fs", default=10.2, type=float)
 parser.add_argument("--start_from_downsampled", default=0, type=int)
 parser.add_argument("--expected_stim_width", default=3, type=int)
-parser.add_argument("--fallback_mask_path", default="0")
+parser.add_argument("--fallback_mask_path", default="None")
 parser.add_argument("--skewness_threshold", default=0)
 parser.add_argument("--n_pcs", default=50)
-parser.add_argument("--crosstalk_mask", default="0", type=str)
+parser.add_argument("--crosstalk_mask", default="None", type=str)
 args = parser.parse_args()
 
 rootpath = args.rootpath
@@ -32,8 +32,8 @@ output_dir = args.output_dir
 if output_dir is None:
     output_dir = rootpath
 
-if args.crosstalk_mask == "0":
-    crosstalk_mask = "0"
+if args.crosstalk_mask == "None":
+    crosstalk_mask = "None"
 else:
     crosstalk_mask = os.path.join(rootpath, args.crosstalk_mask)
 
