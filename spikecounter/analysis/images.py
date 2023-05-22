@@ -166,6 +166,7 @@ def load_image(
     raw: bool = True,
     cam_indices: Optional[Union[int, Iterable[int]]] = None,
     expt_metadata: Optional[Dict[str, Any]] = None,
+    trim: bool = False
 ) -> Tuple[
     Union[npt.NDArray[np.generic], List[npt.NDArray[np.generic]]],
     Optional[Dict[str, Any]],
@@ -184,6 +185,7 @@ def load_image(
             to load the tif files.
         cam_indices: if there are multiple cameras, this is the index of the camera to load.
         expt_metadata: if the metadata has already been loaded, pass it in here
+        trim: whether to account for frames removed during preprocessing
     Returns:
         Image data.  If there is only one camera, this will be a 3D array (time, x, y).  If there
             are multiple cameras, this will be a list of 3D arrays.
@@ -216,11 +218,14 @@ def load_image(
         # Check to make sure that the number of frames in the .bin file matches the number of frames
         # expected from the metadata.
         fc_max = np.max(expt_metadata["frame_counter"])
+        if "remove_from_start" in expt_metadata and trim:
+            fc_max -= (expt_metadata["remove_from_start"] + expt_metadata["remove_from_end"])
         for i, img in enumerate(imgs):
             if fc_max > img.shape[0]:
                 n_frames_dropped = fc_max - img.shape[0]
                 warnings.warn(f"{n_frames_dropped} frames dropped")
                 last_tidx = img.shape[0]
+                expt_metadata["cameras"][i]["dropped_frames"] = n_frames_dropped
             else:
                 last_tidx = int(
                     min(
@@ -1647,6 +1652,7 @@ def identify_hearts(
     method="freq_band",
     corr_threshold=0.9,
     bbox_offset=5,
+    plot=False,
     **initial_segmentation_args,
 ):
     """Pick out hearts from widefield experiments using PCA and power content in frequency band"""
@@ -1668,8 +1674,9 @@ def identify_hearts(
         initial_guesses = method(img)
     else:
         raise Exception("Invalid segmentation method")
-    fig1, ax1 = plt.subplots(figsize=(4, 4))
-    visualize.display_roi_overlay(mean_img, initial_guesses, ax=ax1)
+    if plot:
+        fig1, ax1 = plt.subplots(figsize=(4, 4))
+        visualize.display_roi_overlay(mean_img, initial_guesses, ax=ax1)
     bboxes = [p["bbox"] for p in measure.regionprops(initial_guesses)]
     new_mask = np.zeros_like(mean_img, dtype=bool)
     #     new_mask_labels = np.deepcopy(initial_guesses)
@@ -1704,6 +1711,10 @@ def identify_hearts(
         new_mask = morphology.binary_dilation(
             corr_mask, footprint=morphology.disk(dilation_size)
         )
+        if plot:
+            fig1, ax1 = plt.subplots(figsize=(4,2))
+            q = ax1.imshow(corr_img.max(axis=0))
+            plt.colorbar(q)
     new_mask_labels = measure.label(new_mask)
     coms = ndimage.center_of_mass(
         new_mask,
@@ -1762,10 +1773,14 @@ def segment_by_pca_moments(
     skw_threshold=0,
     ev_threshold=0.3,
     comp_mag_pct=95,
+    gaussfilt_kernel = (2,1,1)
 ):
     """Segment a widefield video with multiple embryos using moments of principal components (heart flickers will be small compared to FOV)"""
     mean_img = img.mean(axis=0)
     zeroed_img = img - mean_img
+    if gaussfilt_kernel:
+        zeroed_img = ndimage.gaussian_filter(zeroed_img, gaussfilt_kernel)
+        zeroed_img -= ndimage.gaussian_filter1d(zeroed_img, gaussfilt_kernel[0] + 3, axis=0)
     rd = zeroed_img.reshape((zeroed_img.shape[0], -1))
     # print(rd.shape)
     n_components = min(n_components, rd.shape[1])

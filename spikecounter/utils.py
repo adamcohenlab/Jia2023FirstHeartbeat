@@ -614,12 +614,12 @@ def traces_to_dict(
     # Find DAQ indices where camera frames were acquired
     rising_edges = np.argwhere(np.diff(matdata["frame_counter"]) == 1).ravel()
     t = rising_edges / matdata["clock_rate"]
-    if trim:
-        start_idx = matdata["remove_from_start"]
-        end_idx = len(t) - matdata["remove_from_end"]
+    if trim and "remove_from_start" in matdata.keys():
+        start_idx = int(matdata["remove_from_start"])
+        end_idx = int(len(t) - matdata["remove_from_end"]-matdata["cameras"][0]["dropped_frames"])
     else:
-        start_idx = 0
-        end_idx = len(t)
+        start_idx = int(0)
+        end_idx = int(len(t))
     t = t[start_idx:end_idx]
     t -= t[0]
     
@@ -635,7 +635,20 @@ def traces_to_dict(
 
         # Extract individual traces
         traces = trace_group["traces"]
-        if isinstance(traces["name"], str):
+        if isinstance(traces, list):
+            for tr in traces:
+                dt_dict[tr["name"]] = np.zeros_like(rising_edges, dtype=float)
+                for j in range(len(rising_edges)):
+                    if j == 0:
+                        dt_dict[tr["name"]][j] = np.max(
+                            tr["values"][:rising_edges[j]]
+                        )
+                    else:
+                        dt_dict[tr["name"]][j] = np.max(
+                            tr["values"][rising_edges[j - 1] : rising_edges[j]]
+                        )
+                dt_dict[tr["name"]] = dt_dict[tr["name"]][start_idx:end_idx]
+        elif isinstance(traces["name"], str):
             dt_dict[traces["name"]] = np.zeros_like(rising_edges, dtype=float)
 
             for j in range(len(rising_edges)):

@@ -26,7 +26,7 @@ exptname = args.exptname
 subfolder = args.subfolder
 
 img, expt_data = images.load_image(rootdir, exptname, subfolder=subfolder)
-dt_dict, t = utils.traces_to_dict(expt_data)
+dt_dict, t = utils.traces_to_dict(expt_data, trim=True)
 dt = np.mean(np.diff(t))
 
 if args.sta_before_s < 0 or args.sta_after_s < 0:

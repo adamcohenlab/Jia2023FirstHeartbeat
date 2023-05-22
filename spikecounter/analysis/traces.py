@@ -120,6 +120,46 @@ def generate_invalid_frame_indices(
         invalid_indices_camera = invalid_indices_daq
     return invalid_indices_camera
 
+def find_peak_bases(
+    peak_trace: npt.NDArray[np.generic],
+    s: float = 1e-6,
+    upsample: float = 1,
+    full_output: bool = False,
+    ref_maxloc=None
+) -> Tuple[float, float, Optional[float], Optional[interpolate.UnivariateSpline]]:
+    """ Find local minima to the left and right of a known peak
+    
+    Args:
+        peak_trace: 1D array of peak waveform
+        s: smoothing factor for spline interpolation
+        full_output"
+    Returns:
+        Tuple of left and right bases
+    """
+    n_taps = len(peak_trace)
+    spl = interpolate.UnivariateSpline(
+        np.arange(n_taps),
+        np.nan_to_num(peak_trace, nan=np.nanmin(peak_trace)),
+        s=1e-6,
+    )
+    x_upsample = np.arange(n_taps, step = 1/upsample)
+    smoothed = spl(x_upsample)
+    smoothed_dfdt = spl.derivative()(x_upsample)
+    smoothed_d2fdt = spl.derivative(n=2)
+    extrema = x_upsample[np.argwhere(np.diff(np.sign(smoothed_dfdt))).ravel()]
+    extrema_values = spl(extrema)
+    is_minimum = smoothed_d2fdt(extrema) > 0
+    
+    if ref_maxloc:
+        max_loc = np.ma.masked_array(extrema_values, np.abs(extrema-ref_maxloc) > 25).argmax()
+    else:
+        max_loc = np.argmax(extrema_values)
+    b1 = extrema[max_loc-1]
+    b2 = extrema[max_loc+1]
+    if full_output:
+        return b1, b2, extrema[max_loc], spl
+    else:
+        return b1, b2, None, None
 
 def plot_trace_with_stim_bars(
     trace,
@@ -1040,6 +1080,7 @@ class TimelapseArrayExperiment:
         self.t = None
         self.raw = None
         self.dFF = None
+        self.dFF_unfiltered = None
         self.dFF_noise = None
         self.missing_data = None
         self.peaks_data = None
@@ -1087,6 +1128,7 @@ class TimelapseArrayExperiment:
         t = []
         data_blocks = []
         dFF_blocks = []
+        dFF_blocks_unfiltered = []
         dFF_noise_blocks = []
         background_blocks = []
 
@@ -1189,13 +1231,16 @@ class TimelapseArrayExperiment:
             dFFs = np.apply_along_axis(
                 intensity_to_dff, 1, data_blocks[idx] - background
             )
-            dFFs_filtered = np.apply_along_axis(filter_function, 1, dFFs)
+            mean_levels = dFFs.mean(axis=1, keepdims=True)
+            dFFs_filtered = np.apply_along_axis(filter_function, 1, dFFs - mean_levels) + mean_levels
             dFFs_noise = dFFs - dFFs_filtered
             dFF_blocks.append(dFFs_filtered)
+            dFF_blocks_unfiltered.append(dFFs)
             dFF_noise_blocks.append(dFFs_noise)
 
         data_blocks = np.concatenate(data_blocks, axis=1)
         dFF_blocks = np.concatenate(dFF_blocks, axis=1)
+        dFF_blocks_unfiltered = np.concatenate(dFF_blocks_unfiltered, axis=1)
         dFF_noise_blocks = np.concatenate(dFF_noise_blocks, axis=1)
 
         # Interpolate to merge all the individual blocks, and mark gaps in the data
@@ -1209,20 +1254,24 @@ class TimelapseArrayExperiment:
 
         data_interp = np.zeros((data_blocks.shape[0], len(t_interp)))
         dFF_interp = np.zeros((dFF_blocks.shape[0], len(t_interp)))
+        dFF_unfiltered_interp = np.zeros((dFF_blocks_unfiltered.shape[0], len(t_interp)))
         dFF_noise_interp = np.zeros((dFF_blocks.shape[0], len(t_interp)))
 
         for roi in range(data_interp.shape[0]):
             f_trace = interpolate.interp1d(t, data_blocks[roi, :])
             data_interp[roi, :] = f_trace(t_interp)
             f_dff = interpolate.interp1d(t, dFF_blocks[roi, :])
+            f_dff_unfiltered = interpolate.interp1d(t, dFF_blocks_unfiltered[roi, :])
             f_dff_noise = interpolate.interp1d(t, dFF_noise_blocks[roi, :])
             dFF_interp[roi, :] = f_dff(t_interp)
+            dFF_unfiltered_interp[roi,:] = f_dff_unfiltered(t_interp)
             dFF_noise_interp[roi, :] = f_dff_noise(t_interp)
 
         self.filter_timepoints(timepoints)
         self.t = t_interp
         self.raw = data_interp
         self.dFF = dFF_interp
+        self.dFF_unfiltered = dFF_unfiltered_interp
         self.dFF_noise = dFF_noise_interp
         self.missing_data = missing_data
         self.n_rois = dFF_interp.shape[0]
@@ -1475,6 +1524,7 @@ class TimelapseArrayExperiment:
         figsize: Tuple[int, int] = (12, 4),
         time: str = "s",
         x_lim: Union[Tuple[float, float], None] = None,
+        show_unfiltered: bool = False
     ) -> Tuple[figure.Figure, Collection[axes.Axes]]:
         """Plot spikes found using find_peaks on DF/F
 
@@ -1484,6 +1534,7 @@ class TimelapseArrayExperiment:
             figsize: Size of the figure
             time: Time unit to use for the x-axis
             x_lim: Optional limits of the x-axis
+            show_unfiltered: show unfiltered dFF
         Returns:
             Figure and axes objects
 
@@ -1515,6 +1566,9 @@ class TimelapseArrayExperiment:
 
             ax.plot(t, self.dFF[roi, :])
             ax.plot(t[peak_indices], self.dFF[roi, peak_indices], "rx")
+            if show_unfiltered:
+                ax2 = ax.twinx()
+                ax2.plot(t, self.dFF_unfiltered[roi,:], color="C2", alpha=0.5)
             ax.set_ylabel(r"$\Delta F/F$")
             ax.set_title(f"ROI {roi}")
             if x_lim:

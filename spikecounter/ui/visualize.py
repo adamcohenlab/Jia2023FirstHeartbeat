@@ -299,7 +299,7 @@ def plot_trace_with_stim_bars(
 ):
     """Plot a trace with rectangles indicating stimulation"""
     if axis is None:
-        fig1, ax1 = plt.subplots(figsize=(12, 4))
+        fig1, ax1 = plt.subplots(figsize=figsize)
     else:
         ax1 = axis
         fig1 = ax1.get_figure()
@@ -308,7 +308,7 @@ def plot_trace_with_stim_bars(
     else:
         ax1.plot(t, trace, color=trace_color)
 
-    add_stims(ax1, stims, start_y, width, height, color=stim_color)
+    add_stims(ax1, stims, start_y, width, height, stim_color=stim_color)
 
     if scale == "axis":
         pass
