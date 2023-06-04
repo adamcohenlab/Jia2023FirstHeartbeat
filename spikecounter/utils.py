@@ -325,7 +325,8 @@ def match_experiments_to_snaps(
     snap_data_by_embryo = snap_data.set_index("embryo")
     for i in range(expt_data.shape[0]):
         try:
-            embryo_snap_data = snap_data_by_embryo.loc[[expt_data.iloc[i]["embryo"]]]
+            curr_embryo = expt_data.iloc[i]["embryo"]
+            embryo_snap_data = snap_data_by_embryo.loc[[curr_embryo]]
             start_time = datetime.strptime(expt_data.iloc[i]["start_time"], "%H:%M:%S")
             snap_times = [
                 datetime.strptime(t, "%H:%M:%S")
@@ -334,7 +335,7 @@ def match_experiments_to_snaps(
             diffs = [abs(start_time - t).seconds for t in snap_times]
             snap_idx = np.argmin(diffs)
             snap_files.append(embryo_snap_data["file_name"].iloc[snap_idx])
-        except KeyError:
+        except KeyError as e:
             snap_files.append(None)
     return pd.concat(
         [expt_data, pd.DataFrame(snap_files, columns=["snap_file"])], axis=1

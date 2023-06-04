@@ -755,7 +755,7 @@ def spline_fit_single_trace(
 
 
 def spline_timing(
-    img: npt.NDArray, s: float = 0.1, n_knots: int = 4, upsample_rate: float = 1
+    img: npt.NDArray, s: float = 0.1, n_knots: int = 4, upsample_rate: int = 1
 ):
     """Perform spline fitting to functional imaging data do determine wavefront timing
 
@@ -781,7 +781,7 @@ def spline_timing(
     smoothed_vid = np.moveaxis(
         smoothed_vid.reshape((img.shape[1], img.shape[2], -1)), 2, 0
     )
-    noise_estimate = np.std(img - smoothed_vid, axis=0)
+    noise_estimate = np.std(img - smoothed_vid[::upsample_rate], axis=0)
     beta = np.concatenate([beta, noise_estimate[np.newaxis, :, :]], axis=0)
     return beta, smoothed_vid
 
@@ -2154,7 +2154,8 @@ def fill_missing_timepoints(
         closest_above_threshold = np.apply_along_axis(
             utils.closest_non_zero, 1, valid_roi_tpoints
         ).squeeze()
-    except ValueError:
+    except ValueError as e:
+        print(e)
         return vid
 
     closest_above_threshold = closest_above_threshold.reshape(np.max(vid), -1)

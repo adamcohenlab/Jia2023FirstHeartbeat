@@ -84,12 +84,10 @@ def tile_plots_conditions(
     n_plots = len(condition_list)
     if n_rows is None:
         n_rows = int(np.ceil(np.sqrt(n_plots)))
-        if n_plots % n_rows == 0:
-            n_cols = n_plots // n_rows
-        else:
-            n_cols = n_plots // n_rows + 1
-    else:
+    if n_plots % n_rows == 0:
         n_cols = n_plots // n_rows
+    else:
+        n_cols = n_plots // n_rows + 1
 
     # Generate subplots
     fig1, axs = plt.subplots(

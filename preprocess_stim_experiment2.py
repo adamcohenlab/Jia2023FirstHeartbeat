@@ -175,16 +175,13 @@ if args.pb_correct_method == "monoexp" or args.pb_correct_mask == "dynamic":
     mask = mean_img > np.percentile(mean_img, 80)
 else:
     mask = None
-pb_corrected_img = exposure.rescale_intensity(
-    images.correct_photobleach(
-        stim_frames_removed,
-        mask=mask,
-        method=args.pb_correct_method,
-        nsamps=nsamps,
-        invert=args.invert,
-        amplitude_window=2,
-    ),
-    out_range=np.uint16,
+pb_corrected_img = images.correct_photobleach(
+    stim_frames_removed,
+    mask=mask,
+    method=args.pb_correct_method,
+    nsamps=nsamps,
+    invert=args.invert,
+    amplitude_window=2,
 )
 skio.imsave(output_folders["corrected"] / f"{expt_name}.tif", pb_corrected_img)
 

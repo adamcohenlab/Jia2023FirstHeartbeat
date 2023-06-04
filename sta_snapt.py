@@ -6,6 +6,8 @@ from spikecounter import utils
 import numpy as np
 import itertools
 import pickle
+import matplotlib.pyplot as plt
+import colorcet as cc
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootdir", help="Root directory")
@@ -40,7 +42,17 @@ if args.stim_channel != "None":
     stim_indices = np.argwhere(np.diff(stims)==1).ravel()
     if len(stim_indices) > 0:
         dFF_img = images.get_image_dFF(img)
-        sta, spike_triggered_images = images.spike_triggered_average_video(dFF_img, stim_indices, *sta_bounds, full_output=True, normalize_height=bool(args.normalize_height))
+        mean_trace = dFF_img.mean(axis=(1,2))
+        # Exclude stims with image-level artifacts
+        window_std = np.array([np.nanstd(mean_trace[st-sta_bounds[0]:st+sta_bounds[1]]) for st in stim_indices])
+        include_mask = window_std < np.mean(window_std)*2
+        fig1, ax1 = plt.subplots(figsize=(8,4))
+        ax1.plot(mean_trace)
+        ax1.vlines(stim_indices, *ax1.get_ylim())
+        ax1.vlines(stim_indices[~include_mask], *ax1.get_ylim(), color="red")
+        plt.savefig(os.path.join(rootdir, "analysis", subfolder, exptname, "mean_trace.svg"))
+        sta, spike_triggered_images = images.spike_triggered_average_video(dFF_img, stim_indices, sta_bounds,
+                                                                           full_output=True, normalize_height=bool(args.normalize_height), include_mask=include_mask)
         skio.imsave(os.path.join(rootdir, "analysis", subfolder, exptname, "sta.tif"), sta)
     else:
         sta, spike_triggered_images = images.image_to_sta(img, fs=1/dt, plot=True, prom_pct=80, \
