@@ -48,17 +48,17 @@ axes.spines.right : False
 
 # Font Family
 font.family: sans-serif
-font.sans-serif: DejaVu Sans, Arial, Helvetica, Lucida Grande, Verdana, Geneva, Lucid, Avant Garde, sans-serif
+font.sans-serif: Arial, DejaVu Sans, Helvetica, Lucida Grande, Verdana, Geneva, Lucid, Avant Garde, sans-serif
 mathtext.fontset : dejavusans
 
 # Font size
-axes.labelsize: 9
-axes.titlesize: 12
-xtick.labelsize: 9
-ytick.labelsize: 9
-legend.fontsize: 9
-font.size: 9
-figure.titlesize: 12
+axes.labelsize: 7
+axes.titlesize: 7
+xtick.labelsize: 6
+ytick.labelsize: 6
+legend.fontsize: 6
+font.size: 7
+figure.titlesize: 7
 
 legend.framealpha: 0.8
 legend.borderpad: 0.4
