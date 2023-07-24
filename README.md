@@ -2,22 +2,22 @@
 
 ### Environment dependencies
 
-The following code environments are required:
-- Python = 3.9
-- Java \>= SE 6
-- MATLAB \>= r2018a
+The following code environments are required: <br>
+- Python = 3.9 <br>
+- Java \>= SE 6 <br>
+- MATLAB \>= r2018a <br>
 
-The following environment variables need to be set:
-
-`SPIKECOUNTER_PATH` - the base path of the code repository.
-`DATA_ROOTDIR` - the base path of the raw data.
-`ANALYSIS_OUTPUT_ROOTDIR` - where you want analysis outputs and plots to go.
-`DATA_REMOTE_ROOTDIR` - \(Optional\) This was used to access specific datasets from file servers. Replace with `DATA_ROOTDIR` in code.
-`CONDA_ENV` - \(Optional\) The name of your conda environment. Only necessary if you intend to use the shell scripts.
+The following environment variables need to be set: <br>
+<br>
+`SPIKECOUNTER_PATH` - the base path of the code repository.<br>
+`DATA_ROOTDIR` - the base path of the raw data.<br>
+`ANALYSIS_OUTPUT_ROOTDIR` - where you want analysis outputs and plots to go.<br>
+`DATA_REMOTE_ROOTDIR` - \(Optional\) This was used to access specific datasets from file servers. Replace with `DATA_ROOTDIR` in code.<br>
+`CONDA_ENV` - \(Optional\) The name of your conda environment. Only necessary if you intend to use the shell scripts.<br>
 
 ### Python package dependencies
 
-All package dependencies are contained in `config/environment.yml`. An environment can be built using [Anaconda](https://docs.conda.io/en/latest/miniconda.html) as follows:
+All package dependencies are contained in `config/environment.yml`. An environment can be built using [Anaconda](https://docs.conda.io/en/latest/miniconda.html) as follows:<br>
 
 ```
 conda env create -f config/environment.yml
