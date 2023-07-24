@@ -7,5 +7,5 @@
 #SBATCH -o job_files/myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e job_files/myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 conda init bash
-conda activate bjia
-python3 SpikeCounter/clicky_calcium_traces_nojvm.py $1 0 --path_to_regions $2 --output_folder $3
+conda activate  $CONDA_ENV
+python3 $SPIKECOUNTER_PATH/scripts/clicky_calcium_traces_nojvm.py $1 0 --path_to_regions $2 --output_folder $3

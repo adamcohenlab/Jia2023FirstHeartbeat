@@ -1,3 +1,4 @@
+from pathlib import Path
 import argparse
 import subprocess
 import os
@@ -15,11 +16,12 @@ parser.add_argument("--sta_before_s", default=2, type=float)
 parser.add_argument("--sta_after_s", default=5, type=float)
 parser.add_argument("--frame_start", default=0, type=int)
 parser.add_argument("--frame_end", default=-0, type=int)
-
-
 args = parser.parse_args()
-rootpath = args.rootpath
 
+SPIKECOUNTER_PATH = Path(os.getenv("SPIKECOUNTER_PATH"))
+assert SPIKECOUNTER_PATH is not None
+
+rootpath = args.rootpath
 expt_info = pd.read_csv(os.path.join(rootpath, args.expt_info), dtype=str).sort_values(
     "start_time"
 )
@@ -28,7 +30,7 @@ for i in range(expt_info.shape[0]):
     f = expt_info.iloc[i]["file_name"]
     sh_line = [
         "sbatch",
-        "/n/home11/bjia/SpikeCounter/cluster/simultaneous_voltage_calcium.sh",
+        str(SPIKECOUNTER_PATH/"cluster/simultaneous_voltage_calcium.sh"),
         rootpath,
         f,
         str(args.um_per_px),

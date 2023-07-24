@@ -1,3 +1,4 @@
+from pathlib import Path
 import argparse
 import subprocess
 import os
@@ -32,7 +33,7 @@ parser.add_argument("--bg_const", default=100, type=float)
 
 
 args = parser.parse_args()
-SPIKECOUNTER_PATH = os.getenv("SPIKECOUNTER_PATH")
+SPIKECOUNTER_PATH = Path(os.getenv("SPIKECOUNTER_PATH"))
 assert SPIKECOUNTER_PATH is not None
 
 rootpath = args.rootpath
@@ -58,7 +59,7 @@ for i in range(expt_info.shape[0]):
     f = expt_info.iloc[i]["file_name"]
     sh_line = [
         "sbatch",
-        SPIKECOUNTER_PATH + "/cluster/preprocess_stim2.sh",
+        str(SPIKECOUNTER_PATH/"cluster/preprocess_stim2.sh"),
         rootpath,
         f,
         args.crosstalk_channel,
@@ -80,8 +81,7 @@ for i in range(expt_info.shape[0]):
         str(args.denoise),
         str(args.decorrelate),
         str(bg_const),
-        str(args.initial_subfolder),
-        SPIKECOUNTER_PATH
+        str(args.initial_subfolder)
     ]
     print(sh_line)
     subprocess.run(sh_line, check=True)

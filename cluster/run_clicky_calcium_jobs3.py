@@ -1,16 +1,18 @@
+from pathlib import Path
 import argparse
 import subprocess
 import os
-import shutil
 import re
-import numpy as np
 import time
-import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("rootpath", type=str)
-
 args = parser.parse_args()
+
+
+SPIKECOUNTER_PATH = Path(os.getenv("SPIKECOUNTER_PATH"))
+assert SPIKECOUNTER_PATH is not None
+
 rootpath = args.rootpath
 
 
@@ -25,7 +27,10 @@ for f in os.listdir(rootpath):
                 
         # print(im_names)
         for im_name in im_names:
-            sh_line = ["sbatch", "SpikeCounter/cluster/clicky_calcium.sh", os.path.join(embryo_path, "%s.tif" % im_name), os.path.join(embryo_path, "analysis/automasks/%s_mask.tif" % im_name), os.path.join(embryo_path, "analysis")]
+            sh_line = ["sbatch", str(SPIKECOUNTER_PATH/"cluster/clicky_calcium.sh"),
+                       os.path.join(embryo_path, "%s.tif" % im_name),
+                       os.path.join(embryo_path, "analysis/automasks/%s_mask.tif" % im_name),
+                       os.path.join(embryo_path, "analysis")]
             print(sh_line)
             subprocess.run(sh_line)
             time.sleep(0.5)

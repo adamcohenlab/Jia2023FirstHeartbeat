@@ -8,5 +8,5 @@
 #SBATCH -e job_files/myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 
 conda init bash
-conda activate bjia2
-python3 $SPIKECOUNTER_PATH/sta_snapt.py $1 $2 --subfolder $3 --s $4 --n_knots $5 --sta_before_s $6 --sta_after_s $7 --normalize_height $8 --bootstrap_n $9 --stim_channel ${10}
+conda activate $CONDA_ENV
+python3 $SPIKECOUNTER_PATH/scripts/sta_snapt.py $1 $2 --subfolder $3 --s $4 --n_knots $5 --sta_before_s $6 --sta_after_s $7 --normalize_height $8 --bootstrap_n $9 --stim_channel ${10}

@@ -1,8 +1,10 @@
-*.csv
-*.tif
-*.xml
+**/*.csv
+**/*.tif
+**/*.xml
 __pycache__/
 **/.ipynb_checkpoints
-*.pwd
-*.asv
+**/*.pwd
+**/*.asv
 out/**/*
+**/*.svg
+**/*.tif

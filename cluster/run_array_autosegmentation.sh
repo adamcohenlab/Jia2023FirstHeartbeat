@@ -7,5 +7,5 @@
 #SBATCH -o myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 conda init bash
-conda activate bjia
-python3 SpikeCounter/run_array_autosegmentation.py $1 $2 --start_idx $3 --end_idx $4 --opening_size $5 --dilation_size $6 --block_size $7 --offset $8  --band_threshold $9 --corr_threshold ${10} --band_min ${11} --band_max ${12}
+conda activate $CONDA_ENV
+python3 $SPIKECOUNTER_PATH/scripts/run_array_autosegmentation.py $1 $2 --start_idx $3 --end_idx $4 --opening_size $5 --dilation_size $6 --block_size $7 --offset $8  --band_threshold $9 --corr_threshold ${10} --band_min ${11} --band_max ${12}

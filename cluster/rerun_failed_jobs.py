@@ -11,22 +11,6 @@ parser.add_argument("--exec", type=int, default=1)
 args = parser.parse_args()
 filepath = args.filepath
 causes = {}
-# failed_jobs = []
-# for p in sorted(os.listdir(".")):
-#     if ".err" in p:
-#         err_file = os.path.join(".", p)
-#         with open(err_file) as f:
-#             if 'limit' in f.read().lower():
-#                 res = parse("myerrors_{:d}.err", p)
-#                 failed_jobs.append(res[0])
-#                 causes[res[0]] = "time"
-#         with open(err_file) as f:
-#             if 'mem' in f.read().lower():
-#                 res = parse("myerrors_{:d}.err", p)
-#                 failed_jobs.append(res[0])
-#                 causes[res[0]] = "mem"
-# failed_jobs = set(failed_jobs)
-# print(failed_jobs)
 failed_job_lines = []
 successful_count = 0
 line_counter = 0

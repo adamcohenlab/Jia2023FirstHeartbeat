@@ -7,5 +7,5 @@
 #SBATCH -o myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 conda init bash
-conda activate bjia
-python3 SpikeCounter/segment_heartbeats.py $1 $2 $3
+conda activate $CONDA_ENV
+python3 $SPIKECOUNTER_PATH/scripts/segment_heartbeats.py $1 $2 $3

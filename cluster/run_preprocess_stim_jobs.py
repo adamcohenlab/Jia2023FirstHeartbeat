@@ -1,9 +1,7 @@
+from pathlib import Path
 import argparse
 import subprocess
 import os
-import shutil
-import re
-import numpy as np
 import pandas as pd
 from datetime import datetime
 
@@ -26,6 +24,9 @@ parser.add_argument("--n_pcs", default=50)
 parser.add_argument("--crosstalk_mask", default="None", type=str)
 args = parser.parse_args()
 
+SPIKECOUNTER_PATH = Path(os.getenv("SPIKECOUNTER_PATH"))
+assert SPIKECOUNTER_PATH is not None
+
 rootpath = args.rootpath
 output_dir = args.output_dir
 
@@ -47,10 +48,11 @@ for s in ["downsampled", "stim_frames_removed", "corrected", "denoised"]:
     expt_info.to_csv(os.path.join(output_dir, "analysis", s, "experiment_data.csv"), index=False)
 
 for f in expt_info["file_name"]:
-    sh_line = ["sbatch", "SpikeCounter/cluster/preprocess_widefield_stim.sh", rootpath, f, str(args.expected_stims), output_dir, str(args.remove_from_start),\
-              str(args.remove_from_end), str(args.scale_factor),\
-              str(args.zsc_threshold), str(args.upper), str(args.fs),\
-              str(args.start_from_downsampled), str(args.expected_stim_width),\
+    sh_line = ["sbatch", str(SPIKECOUNTER_PATH/"cluster/preprocess_widefield_stim.sh"),
+            rootpath, f, str(args.expected_stims), output_dir, str(args.remove_from_start),
+              str(args.remove_from_end), str(args.scale_factor),
+              str(args.zsc_threshold), str(args.upper), str(args.fs),
+              str(args.start_from_downsampled), str(args.expected_stim_width),
                args.fallback_mask_path, str(args.n_pcs), str(args.skewness_threshold), crosstalk_mask]
     print(sh_line)
     subprocess.run(sh_line)

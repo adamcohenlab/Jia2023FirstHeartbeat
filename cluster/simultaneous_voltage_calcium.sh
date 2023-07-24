@@ -7,5 +7,5 @@
 #SBATCH -o job_files/myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e job_files/myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
 conda init bash
-conda activate bjia2
-python3 /n/home11/bjia/SpikeCounter/analyze_simultaneous_voltage_calcium.py $1 $2 --um_per_px $3 --hard_cutoff $4 --downsample_factor $5 --window_size_s $6 --sta_before_s $7 --sta_after_s $8 --frame_start $9 --frame_end ${10}
+conda activate $CONDA_ENV
+python3 $SPIKECOUNTER_PATH/scripts/analyze_simultaneous_voltage_calcium.py $1 $2 --um_per_px $3 --hard_cutoff $4 --downsample_factor $5 --window_size_s $6 --sta_before_s $7 --sta_after_s $8 --frame_start $9 --frame_end ${10}

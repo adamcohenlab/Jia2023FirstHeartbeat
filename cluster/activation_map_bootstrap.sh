@@ -6,7 +6,6 @@
 #SBATCH --mem=8000          # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o myoutput_%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e myerrors_%j.err  # File to which STDERR will be written, %j inserts jobid
-
 conda init bash
-conda activate bjia2
-python3 SpikeCounter/activation_map_bootstrap_analysis.py $1 $2 --subfolder $3
+conda activate $CONDA_ENV
+python3 $SPIKECOUNTER_PATH/scripts/activation_map_bootstrap_analysis.py $1 $2 --subfolder $3
