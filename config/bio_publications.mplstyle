@@ -66,3 +66,4 @@ legend.borderaxespad: 0.6
 
 image.cmap: cet_CET_R1
 savefig.transparent: True
+svg.fonttype: none
